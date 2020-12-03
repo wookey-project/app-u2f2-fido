@@ -28,7 +28,7 @@ config APP_FIDO_HEAPSIZE
 config APP_FIDO_STACKSIZE
   int "Stack size"
   depends on APP_FIDO
-  default 8192
+  default 32000
   ---help---
     Specify the application stack size, in bytes. By default, set to 8192
     (i.e. 8k). Depending on the number of slots required, and the usage,
