@@ -161,6 +161,7 @@ int _main(uint32_t task_id)
             /* Wink request received */
             log_printf("[FIDO] received MAGIC_WINK_REQ from USB\n");
             /* check for other waiting msg before sleeping */
+            handle_wink(1000, usb_msq);
 
             goto endloop;
         }

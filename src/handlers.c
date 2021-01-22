@@ -13,11 +13,16 @@
 #include "main.h"
 
 
-mbed_error_t handle_wink(uint16_t timeout_ms)
+mbed_error_t handle_wink(uint16_t timeout_ms, int usb_msq)
 {
+    /* FIXME: get back EMULATION config and handle it here */
     wink_up();
     waitfor(timeout_ms);
     wink_down();
+
+    printf("[FIDO] Send WINK acknowledge to USB\n");
+    uint32_t mtype = MAGIC_ACKNOWLEDGE;
+    msgsnd(usb_msq, &mtype, 0, 0);
 
     return MBED_ERROR_NONE;
 }
