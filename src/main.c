@@ -22,6 +22,10 @@ device_t    up;
 int    desc_up = 0;
 
 int pin_msq = 0;
+int get_pin_msq(void) {
+    return pin_msq;
+}
+
 int parser_msq = 0;
 
 mbed_error_t unlock_u2f2(void)
@@ -78,7 +82,7 @@ static mbed_error_t declare_userpresence_backend(void)
     memset (&up, 0, sizeof (up));
 
     strncpy (up.name, "UsPre", sizeof (up.name));
-    up.gpio_num = 3; /* Number of configured GPIO */
+    up.gpio_num = 2; /* Number of configured GPIO */
 
     up.gpios[0].kref.port = led0_dev_infos.gpios[LED0_BASE].port;
     up.gpios[0].kref.pin = led0_dev_infos.gpios[LED0_BASE].pin;
@@ -99,19 +103,6 @@ static mbed_error_t declare_userpresence_backend(void)
     up.gpios[1].type     = GPIO_PIN_OTYPER_PP;
     up.gpios[1].speed    = GPIO_PIN_HIGH_SPEED;
 
-
-    up.gpios[2].kref.port = dfu_button_dev_infos.gpios[DFU_BUTTON_BASE].port;
-    up.gpios[2].kref.pin = dfu_button_dev_infos.gpios[DFU_BUTTON_BASE].pin;
-    up.gpios[2].mask     = GPIO_MASK_SET_MODE | GPIO_MASK_SET_PUPD |
-                                 GPIO_MASK_SET_TYPE | GPIO_MASK_SET_SPEED |
-                                 GPIO_MASK_SET_EXTI;
-    up.gpios[2].mode     = GPIO_PIN_INPUT_MODE;
-    up.gpios[2].pupd     = GPIO_PULLDOWN;
-    up.gpios[2].type     = GPIO_PIN_OTYPER_PP;
-    up.gpios[2].speed    = GPIO_PIN_LOW_SPEED;
-    up.gpios[2].exti_trigger = GPIO_EXTI_TRIGGER_RISE;
-    up.gpios[2].exti_lock    = GPIO_EXTI_UNLOCKED;
-    up.gpios[2].exti_handler = (user_handler_t) exti_button_handler;
 
     ret = sys_init(INIT_DEVACCESS, &up, &desc_up);
     if (ret == SYS_E_DONE) {
@@ -165,6 +156,7 @@ int _main(uint32_t task_id)
     /*U2FAPDU & FIDO are handled here, direct callback access */
 
     /* TODO callbacks protection */
+    ADD_LOC_HANDLER(handle_userpresence_backend);
     u2f_fido_initialize(handle_userpresence_backend);
 
     /*******************************************

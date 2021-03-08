@@ -10,6 +10,8 @@
 #endif
 
 
+int get_pin_msq(void);
+
 /* exported utilities */
 void wink_up(void);
 void wink_down(void);

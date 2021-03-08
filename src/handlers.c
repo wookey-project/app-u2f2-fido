@@ -157,15 +157,12 @@ bool handle_userpresence_backend(uint16_t timeout)
 {
     /* wait half of duration and return ok by now */
     button_pushed = false;
-    wink_up();
-    printf("[USB] userpresence: waiting for %d ms\n", timeout/2);
-    sys_sleep (timeout, SLEEP_MODE_INTERRUPTIBLE);
-    if (button_pushed == true) {
-        printf("[USB] button pushed !!!\n");
-        wink_down();
-        return true;
-    }
-    return false;
+    /* TODO: this should be timeouted here */
+    timeout = timeout;
+
+    send_signal_with_acknowledge(get_pin_msq(), MAGIC_USER_PRESENCE_REQ, MAGIC_USER_PRESENCE_ACK);
+    button_pushed = true;
+    return button_pushed;
 }
 
 
