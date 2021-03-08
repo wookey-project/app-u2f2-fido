@@ -7,7 +7,7 @@
 #include "libc/string.h"
 #include "libc/syscall.h"
 
-#include "libu2fapdu.h"
+#include "libfido.h"
 
 #include "handlers.h"
 #include "main.h"
@@ -34,7 +34,7 @@ uint8_t resp_buf[1024] = { 0 };
  * handle APDU request reception from USB, execute it, and send response to USB
  *
  */
-mbed_error_t handle_apdu_request(int usb_msq)
+mbed_error_t handle_fido_request(int usb_msq)
 {
     mbed_error_t errcode = MBED_ERROR_NONE;
     int ret;
@@ -105,7 +105,7 @@ mbed_error_t handle_apdu_request(int usb_msq)
     hexdump(cmd_buf, msg_size);
     cmd_buf[msg_size] = 0x0;
 
-    errcode = u2fapdu_handle_cmd(metadata, &cmd_buf[0], msg_size, &resp_buf[0], &resp_len);
+    errcode = u2f_fido_handle_cmd(metadata, &cmd_buf[0], msg_size, &resp_buf[0], &resp_len);
 
     /* return back content */
 

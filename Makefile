@@ -44,7 +44,7 @@ LDFLAGS += $(EXTRA_LDFLAGS) -L$(APP_BUILD_DIR)
 # we use start group and end group because usbotghs and usbctrl have inter
 # dependencies, requiring the linker to resolve their respective symbols
 # each time
-LD_LIBS += -Wl,--start-group -Wl,-lu2fapdu -Wl,-lfido -Wl,-lhmac -Wl,-lsign -Wl,--end-group -Wl,-lstd
+LD_LIBS += -Wl,--start-group -Wl,-lfido -Wl,-lhmac -Wl,-lsign -Wl,--end-group -Wl,-lstd
 
 ###################################################################
 # okay let's list our source files and generated files now
@@ -77,7 +77,6 @@ TODEL_DISTCLEAN += $(APP_BUILD_DIR)
 
 ## library dependencies
 LIBDEP := $(BUILD_DIR)/libs/libstd/libstd.a \
-		  $(BUILD_DIR)/libs/libu2fapdu/libu2fapdu.a \
 		  $(BUILD_DIR)/libs/libfido/libfido.a \
 		  $(BUILD_DIR)/libs/libhmac/libhmac.a \
 		  $(BUILD_DIR)/externals/libsign.a

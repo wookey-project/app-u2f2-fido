@@ -9,6 +9,7 @@
 
 #include "autoconf.h"
 #include "libfido.h"
+#include "libu2f2.h"
 #include "libu2fapdu.h"
 #include "generated/led0.h"
 #include "generated/led1.h"
@@ -19,6 +20,20 @@
 
 device_t    up;
 int    desc_up = 0;
+
+int pin_msq = 0;
+int parser_msq = 0;
+
+mbed_error_t unlock_u2f2(void)
+{
+    if (send_signal_with_acknowledge(pin_msq, MAGIC_PIN_CONFIRM_UNLOCK, MAGIC_PIN_UNLOCK_CONFIRMED) != MBED_ERROR_NONE) {
+        printf("failed while requesting PIN for confirm unlock! erro=%d\n", errno);
+        goto err;
+    }
+err:
+    return MBED_ERROR_NONE;
+}
+
 
 
 /*********************************************************
@@ -116,17 +131,24 @@ int _main(uint32_t task_id)
     uint8_t ret;
 
     printf("%s\n", wellcome_msg);
+    wmalloc_init();
 
     declare_userpresence_backend();
-    int usb_msq = 0;
+    int parser_msq = 0;
 
     /* Posix SystemV message queue init */
     printf("initialize Posix SystemV message queue with USB task\n");
-    usb_msq = msgget("usb", IPC_CREAT | IPC_EXCL);
-    if (usb_msq == -1) {
+    parser_msq = msgget("parser", IPC_CREAT | IPC_EXCL);
+    if (parser_msq == -1) {
         printf("error while requesting SysV message queue. Errno=%x\n", errno);
         goto err;
     }
+    pin_msq = msgget("u2fpin", IPC_CREAT | IPC_EXCL);
+    if (pin_msq == -1) {
+        printf("error while requesting SysV message queue. Errno=%x\n", errno);
+        goto err;
+    }
+
 
     ret = sys_init(INIT_DONE);
 
@@ -142,7 +164,6 @@ int _main(uint32_t task_id)
 
     /*U2FAPDU & FIDO are handled here, direct callback access */
 
-    u2fapdu_register_callback(u2f_fido_handle_cmd);
     /* TODO callbacks protection */
     u2f_fido_initialize(handle_userpresence_backend);
 
@@ -153,24 +174,33 @@ int _main(uint32_t task_id)
     /* wait for requests from USB task */
     int msqr;
     msg_mtext_union_t mbuf = { 0 };
+    printf("[FIDO] parser_msq is %d\n", parser_msq);
+
+    // FIX: temp: get back MAGIC_IS_BACKEND_READY, and acknowledge
+    /* transmitting 'backend ready?' to backend fido app, and requesting PIN in the meantime (prehook) for AUTH */
+
+    ADD_LOC_HANDLER(unlock_u2f2);
+    handle_signal(parser_msq, MAGIC_IS_BACKEND_READY, MAGIC_BACKEND_IS_READY, unlock_u2f2);
+    // END FIX
+
+
     size_t msgsz = 64;
-    printf("[FIDO] usb_msq is %d\n", usb_msq);
     do {
-        msqr = msgrcv(usb_msq, &mbuf, msgsz, MAGIC_WINK_REQ, IPC_NOWAIT);
+        msqr = msgrcv(parser_msq, &mbuf, msgsz, MAGIC_WINK_REQ, IPC_NOWAIT);
         if (msqr >= 0) {
             /* Wink request received */
             log_printf("[FIDO] received MAGIC_WINK_REQ from USB\n");
             /* check for other waiting msg before sleeping */
-            handle_wink(1000, usb_msq);
+            handle_wink(1000, parser_msq);
 
             goto endloop;
         }
-        msqr = msgrcv(usb_msq, &mbuf, msgsz, MAGIC_APDU_CMD_INIT, IPC_NOWAIT);
+        msqr = msgrcv(parser_msq, &mbuf, msgsz, MAGIC_APDU_CMD_INIT, IPC_NOWAIT);
         if (msqr >= 0) {
             /* APDU message handling eceived */
             log_printf("[FIDO] received MAGIC_APDU_CMD_INIT from USB\n");
             /* and stard handling cmd */
-            handle_apdu_request(usb_msq);
+            handle_fido_request(parser_msq);
             /* check for other waiting msg before sleeping */
             goto endloop;
         }
