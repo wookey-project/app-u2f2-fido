@@ -30,12 +30,79 @@ int parser_msq = 0;
 
 mbed_error_t unlock_u2f2(void)
 {
-    if (send_signal_with_acknowledge(pin_msq, MAGIC_PIN_CONFIRM_UNLOCK, MAGIC_PIN_UNLOCK_CONFIRMED) != MBED_ERROR_NONE) {
+    mbed_error_t errcode = MBED_ERROR_NONE;
+    /* unlocking u2f2 is made of multiple steps:
+     * 1/ ask u2fpin for 'backend_ready'
+     */
+    msg_mtext_union_t data = { 0 };
+    size_t data_len = 64;
+
+    if (send_signal_with_acknowledge(pin_msq, MAGIC_IS_BACKEND_READY, MAGIC_BACKEND_IS_READY) != MBED_ERROR_NONE) {
         printf("failed while requesting PIN for confirm unlock! erro=%d\n", errno);
+        errcode = MBED_ERROR_UNKNOWN;
         goto err;
     }
+    /* 2/ initiate iso7816 communication with auth token (wait for smartcard if needed)
+     */
+
+    // TODO ==> add applet backend interactions
+
+
+    /* 3/ ask u2fpin for petPin (required by smartcard), and get back upto 64 bytes
+     */
+    if (exchange_data(pin_msq, MAGIC_PETPIN_INSERT, MAGIC_PETPIN_INSERTED, NULL/*data_sent*/, 0/*data_sent_len*/, &data, &data_len) != MBED_ERROR_NONE) {
+        printf("failed while requesting PetPIN for confirm unlock! erro=%d\n", errno);
+        errcode = MBED_ERROR_UNKNOWN;
+        goto err;
+    }
+
+    // TODO ==> add applet backend interactions
+    // FIX emulation:
+    if (strcmp(&data.c[0], "1234") != 0) {
+        printf("PetPIN %s invalid!\n", &data.c[0]);
+        errcode = MBED_ERROR_INVCREDENCIALS;
+        goto err;
+    }
+
+    memset(&data, 0x0, sizeof(msg_mtext_union_t));
+    data_len = 1;
+
+    /* TODO: emulate passphrase: */
+    strncpy(&data.c[0], "toto", sizeof("toto"));
+    data_len = sizeof("toto");
+
+     /* 4/ if ok, return passphrase to u2fpin, get back one byte (00 == false, 0xff == true)  */
+    if (exchange_data(pin_msq, MAGIC_PASSPHRASE_CONFIRM, MAGIC_PASSPHRASE_RESULT, &data, data_len, &data, &data_len) != MBED_ERROR_NONE) {
+        printf("failed while requesting PIN for confirm unlock! erro=%d\n", errno);
+        errcode = MBED_ERROR_UNKNOWN;
+        goto err;
+    }
+    if (data.u8[0] != 0xff) {
+        printf("Invalid passphrase !!!\n");
+        errcode = MBED_ERROR_INVCREDENCIALS;
+    }
+    /*
+     * 5/ if ok ask u2fpin for userPin
+     */
+    data_len = 64;
+    if (exchange_data(pin_msq, MAGIC_USERPIN_INSERT, MAGIC_USERPIN_INSERTED, NULL, 0, &data, &data_len) != MBED_ERROR_NONE) {
+        printf("failed while requesting UserPIN for confirm unlock! erro=%d\n", errno);
+        errcode = MBED_ERROR_UNKNOWN;
+        goto err;
+    }
+
+    // TODO ==> add applet backend interactions
+    // FIX emulation:
+    if (strcmp(&data.c[0], "1337") != 0) {
+        printf("UserPIN %s invalid!\n", &data.c[0]);
+        errcode = MBED_ERROR_INVCREDENCIALS;
+        goto err;
+    }
+
+    /* ... and acknowledge frontend
+     */
 err:
-    return MBED_ERROR_NONE;
+    return errcode;
 }
 
 
