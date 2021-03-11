@@ -255,7 +255,7 @@ printf("===> auth_token_request_pet_name_confirmation\n");
 
     if(pet_name == NULL){
         goto err;
-    }    
+    }
     strncpy(&data.c[0], pet_name, pet_name_len);
 printf("==> PETNAME = %s\n", &data.c[0]);
     if (exchange_data(u2fpin_msq, MAGIC_PASSPHRASE_CONFIRM, MAGIC_PASSPHRASE_RESULT, &data, data_len, &data, &data_len) != MBED_ERROR_NONE) {
@@ -289,41 +289,6 @@ static volatile bool token_initialized = false;
 mbed_error_t unlock_u2f2(void)
 {
     mbed_error_t errcode = MBED_ERROR_NONE;
-    e_syscall_ret ret = 0;
-
-    token_initialized = false;
-    /* 2/ initiate iso7816 communication with auth token (wait for smartcard if needed)
-     */
-    int tokenret = 0;
-    tokenret = token_early_init(TOKEN_MAP_AUTO);
-    switch (tokenret) {
-        case 0:
-            printf("Smartcard early init done\n");
-            break;
-        case 1:
-            printf("error while declaring GPIOs\n");
-            break;
-        case 2:
-            printf("error while declaring USART\n");
-            break;
-        case 3:
-            printf("error while init smartcard\n");
-            break;
-        default:
-            printf("unknown error while init smartcard\n");
-            errcode = MBED_ERROR_UNKNOWN;
-            goto err;
-    }
-#ifdef CONFIG_APP_FIDO_USE_BKUP_SRAM
-    if(bsram_keybag_init()){
-        errcode = MBED_ERROR_UNKNOWN;
-        goto err;
-    }
-#endif
-
-    printf("set init as done\n");
-    ret = sys_init(INIT_DONE);
-    printf("sys_init returns %s !\n", strerror(ret));
 
     /* unlocking u2f2 is made of multiple steps:
      * 1/ ask u2fpin for 'backend_ready'
@@ -367,7 +332,7 @@ mbed_error_t unlock_u2f2(void)
     ADD_LOC_HANDLER(auth_token_acknowledge_pin)
     ADD_LOC_HANDLER(auth_token_request_pet_name)
     ADD_LOC_HANDLER(auth_token_request_pet_name_confirmation)
-    if(!tokenret && auth_token_exchanges(&curr_token_channel, &auth_token_callbacks, MASTER_secret, sizeof(MASTER_secret), MASTER_secret_h, sizeof(MASTER_secret_h), sdpwd, sizeof(sdpwd), NULL, 0))
+    if(auth_token_exchanges(&curr_token_channel, &auth_token_callbacks, MASTER_secret, sizeof(MASTER_secret), MASTER_secret_h, sizeof(MASTER_secret_h), sdpwd, sizeof(sdpwd), NULL, 0))
     {
         errcode = MBED_ERROR_UNKNOWN;
         goto err;
@@ -465,6 +430,7 @@ static mbed_error_t declare_userpresence_backend(void)
 int _main(uint32_t task_id)
 {
     task_id = task_id;
+    e_syscall_ret ret = 0;
     char *wellcome_msg = "hello, I'm USB HID frontend";
     //uint8_t ret;
 
@@ -488,11 +454,46 @@ int _main(uint32_t task_id)
     }
 
 
-
-   /*
-     * Let's declare a keyboard
+    /* declaring devices... */
+    token_initialized = false;
+    /* 2/ initiate iso7816 communication with auth token (wait for smartcard if needed)
      */
-    //fido_declare(usbxdci_handler);
+    int tokenret = 0;
+    tokenret = token_early_init(TOKEN_MAP_AUTO);
+    switch (tokenret) {
+        case 0:
+            printf("Smartcard early init done\n");
+            break;
+        case 1:
+            printf("error while declaring GPIOs\n");
+            goto err;
+            break;
+        case 2:
+            printf("error while declaring USART\n");
+            goto err;
+            break;
+#if 0
+        // PTH: this return value does not exist in the call graph. Only declarative part here
+        case 3:
+            printf("error while init smartcard\n");
+            break;
+#endif
+        default:
+            printf("unknown error while init smartcard\n");
+            goto err;
+    }
+#ifdef CONFIG_APP_FIDO_USE_BKUP_SRAM
+    if(bsram_keybag_init()){
+        errcode = MBED_ERROR_UNKNOWN;
+        goto err;
+    }
+#endif
+
+    printf("set init as done\n");
+    ret = sys_init(INIT_DONE);
+    printf("sys_init returns %s !\n", strerror(ret));
+
+
 
     /*U2FAPDU & FIDO are handled here, direct callback access */
 
