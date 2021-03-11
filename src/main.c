@@ -250,14 +250,15 @@ printf("===> auth_token_request_pet_name\n");
 int auth_token_request_pet_name_confirmation(const char *pet_name, unsigned int pet_name_len)
 {
     msg_mtext_union_t data = { 0 };
-    size_t data_len = sizeof(msg_mtext_union_t);
+    size_t data_len = 0;
 printf("===> auth_token_request_pet_name_confirmation\n");
 
     if(pet_name == NULL){
         goto err;
     }
     strncpy(&data.c[0], pet_name, pet_name_len);
-printf("==> PETNAME = %s\n", &data.c[0]);
+    data_len = pet_name_len;
+    printf("==> PETNAME = %s\n", &data.c[0]);
     if (exchange_data(u2fpin_msq, MAGIC_PASSPHRASE_CONFIRM, MAGIC_PASSPHRASE_RESULT, &data, data_len, &data, &data_len) != MBED_ERROR_NONE) {
         printf("failed while requesting U2FPIN for confirm unlock! erro=%d\n", errno);
         goto err;
