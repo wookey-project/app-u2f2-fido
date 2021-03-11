@@ -33,6 +33,22 @@ static token_channel *fido_get_token_channel(void)
 /*****************************************************************************************************/
 /*****************************************************************************************************/
 /************************** Interactions with the AUTH token applet FIDO part ************************/
+/**** Open a FIDO session by sending our sectret ***/
+int fido_open_session(void)
+{
+	uint8_t pkey[32] = { 0 };
+	if(fido_get_token_channel()->channel_initialized != 1){
+		goto err;
+	}
+	if(auth_token_fido_send_pkey(fido_get_token_channel(), pkey, sizeof(pkey))){
+		goto err;
+	}
+
+	return 0;
+err:
+	return -1;
+}
+
 /**** Handle the tokens callbacks ****/
 int callback_fido_register(const uint8_t *app_data, uint16_t app_data_len, uint8_t *key_handle, uint16_t *key_handle_len, uint8_t *ecdsa_priv_key, uint16_t *ecdsa_priv_key_len){
 	if((key_handle_len == NULL) || (ecdsa_priv_key_len == NULL)){
@@ -176,7 +192,6 @@ int auth_token_request_pin(char *pin, unsigned int *pin_len, token_pin_types pin
     msg_mtext_union_t data = { 0 };
     size_t data_len = sizeof(msg_mtext_union_t);
 
-printf("===> auth_token_request_pin\n");
     if(action == TOKEN_PIN_AUTHENTICATE){
         if(pin_type == TOKEN_PET_PIN){
             if (exchange_data(u2fpin_msq, MAGIC_PETPIN_INSERT, MAGIC_PETPIN_INSERTED, NULL/*data_sent*/, 0/*data_sent_len*/, &data, &data_len) != MBED_ERROR_NONE) {
@@ -195,7 +210,6 @@ printf("===> auth_token_request_pin\n");
             }
             *pin_len = data_len;
             memcpy(pin, &data.c[0], data_len);
-printf("==> PET PIN = %s\n", global_pet_pin);
         }
         else if(pin_type == TOKEN_USER_PIN){
             if (exchange_data(u2fpin_msq, MAGIC_USERPIN_INSERT, MAGIC_USERPIN_INSERTED, NULL/*data_sent*/, 0/*data_sent_len*/, &data, &data_len) != MBED_ERROR_NONE) {
@@ -214,7 +228,6 @@ printf("==> PET PIN = %s\n", global_pet_pin);
             }
             *pin_len = data_len;
             memcpy(pin, &data.c[0], data_len);
-printf("==> User PIN = %s\n", global_user_pin);
         }
         else{
             goto err;
@@ -235,14 +248,12 @@ err:
 
 int auth_token_acknowledge_pin(__attribute__((unused)) token_ack_state ack, __attribute__((unused)) token_pin_types pin_type, __attribute__((unused)) token_pin_actions action, __attribute__((unused)) uint32_t remaining_tries)
 {
-printf("===> auth_token_acknowledge_pin\n");
     /* FIXME: TODO: */
     return 0;
 }
 
 int auth_token_request_pet_name(__attribute__((unused)) char *pet_name,  __attribute__((unused))unsigned int *pet_name_len)
 {
-printf("===> auth_token_request_pet_name\n");
     /* FIXME: TODO: */
     return 0;
 }
@@ -251,14 +262,12 @@ int auth_token_request_pet_name_confirmation(const char *pet_name, unsigned int 
 {
     msg_mtext_union_t data = { 0 };
     size_t data_len = 0;
-printf("===> auth_token_request_pet_name_confirmation\n");
 
     if(pet_name == NULL){
         goto err;
     }
     strncpy(&data.c[0], pet_name, pet_name_len);
     data_len = pet_name_len;
-    printf("==> PETNAME = %s\n", &data.c[0]);
     if (exchange_data(u2fpin_msq, MAGIC_PASSPHRASE_CONFIRM, MAGIC_PASSPHRASE_RESULT, &data, data_len, &data, &data_len) != MBED_ERROR_NONE) {
         printf("failed while requesting U2FPIN for confirm unlock! erro=%d\n", errno);
         goto err;
@@ -275,8 +284,8 @@ err:
 
 void smartcard_removal_action(void){
     /* Check if smartcard has been removed, and reboot if yes */
-    if((curr_token_channel.card.type != SMARTCARD_UNKNOWN) && !SC_is_smartcard_inserted(&(curr_token_channel.card))){
-        SC_smartcard_lost(&(curr_token_channel.card));
+    if((fido_get_token_channel()->card.type != SMARTCARD_UNKNOWN) && !SC_is_smartcard_inserted(&(fido_get_token_channel()->card))){
+        SC_smartcard_lost(&(fido_get_token_channel()->card));
         sys_reset();
     }
 }
@@ -315,11 +324,11 @@ mbed_error_t unlock_u2f2(void)
     unsigned char MASTER_secret_h[32] = {0};
 
     /* Register smartcard removal handler */
-    curr_token_channel.card.type = SMARTCARD_CONTACT;
+    fido_get_token_channel()->card.type = SMARTCARD_CONTACT;
     /* Register our callback */
     ADD_LOC_HANDLER(smartcard_removal_action)
-    SC_register_user_handler_action(&(curr_token_channel.card), smartcard_removal_action);
-    curr_token_channel.card.type = SMARTCARD_UNKNOWN;
+    SC_register_user_handler_action(&(fido_get_token_channel()->card), smartcard_removal_action);
+    fido_get_token_channel()->card.type = SMARTCARD_UNKNOWN;
 
     /* Token callbacks */
     cb_token_callbacks auth_token_callbacks = {
@@ -333,7 +342,7 @@ mbed_error_t unlock_u2f2(void)
     ADD_LOC_HANDLER(auth_token_acknowledge_pin)
     ADD_LOC_HANDLER(auth_token_request_pet_name)
     ADD_LOC_HANDLER(auth_token_request_pet_name_confirmation)
-    if(auth_token_exchanges(&curr_token_channel, &auth_token_callbacks, MASTER_secret, sizeof(MASTER_secret), MASTER_secret_h, sizeof(MASTER_secret_h), sdpwd, sizeof(sdpwd), NULL, 0))
+    if(auth_token_exchanges(fido_get_token_channel(), &auth_token_callbacks, MASTER_secret, sizeof(MASTER_secret), MASTER_secret_h, sizeof(MASTER_secret_h), sdpwd, sizeof(sdpwd), NULL, 0))
     {
         errcode = MBED_ERROR_UNKNOWN;
         goto err;
@@ -364,20 +373,12 @@ void wink_up(void)
     if (ret != SYS_E_DONE) {
         printf ("sys_cfg(): failed\n");
     }
-    ret = sys_cfg(CFG_GPIO_SET, (uint8_t) up.gpios[1].kref.val, 1);
-    if (ret != SYS_E_DONE) {
-        printf ("sys_cfg(): failed\n");
-    }
 }
 
 void wink_down(void)
 {
     uint8_t ret;
     ret = sys_cfg(CFG_GPIO_SET, (uint8_t) up.gpios[0].kref.val, 0);
-    if (ret != SYS_E_DONE) {
-        printf ("sys_cfg(): failed\n");
-    }
-    ret = sys_cfg(CFG_GPIO_SET, (uint8_t) up.gpios[1].kref.val, 0);
     if (ret != SYS_E_DONE) {
         printf ("sys_cfg(): failed\n");
     }
@@ -395,26 +396,16 @@ static mbed_error_t declare_userpresence_backend(void)
     memset (&up, 0, sizeof (up));
 
     strncpy (up.name, "UsPre", sizeof (up.name));
-    up.gpio_num = 2; /* Number of configured GPIO */
+    up.gpio_num = 1; /* Number of configured GPIO */
 
-    up.gpios[0].kref.port = led0_dev_infos.gpios[LED0_BASE].port;
-    up.gpios[0].kref.pin = led0_dev_infos.gpios[LED0_BASE].pin;
+    up.gpios[0].kref.port = led1_dev_infos.gpios[LED0_BASE].port;
+    up.gpios[0].kref.pin = led1_dev_infos.gpios[LED0_BASE].pin;
     up.gpios[0].mask     = GPIO_MASK_SET_MODE | GPIO_MASK_SET_PUPD |
                                  GPIO_MASK_SET_TYPE | GPIO_MASK_SET_SPEED;
     up.gpios[0].mode     = GPIO_PIN_OUTPUT_MODE;
     up.gpios[0].pupd     = GPIO_PULLDOWN;
     up.gpios[0].type     = GPIO_PIN_OTYPER_PP;
     up.gpios[0].speed    = GPIO_PIN_HIGH_SPEED;
-
-
-    up.gpios[1].kref.port = led1_dev_infos.gpios[LED0_BASE].port;
-    up.gpios[1].kref.pin = led1_dev_infos.gpios[LED0_BASE].pin;
-    up.gpios[1].mask     = GPIO_MASK_SET_MODE | GPIO_MASK_SET_PUPD |
-                                 GPIO_MASK_SET_TYPE | GPIO_MASK_SET_SPEED;
-    up.gpios[1].mode     = GPIO_PIN_OUTPUT_MODE;
-    up.gpios[1].pupd     = GPIO_PULLDOWN;
-    up.gpios[1].type     = GPIO_PIN_OTYPER_PP;
-    up.gpios[1].speed    = GPIO_PIN_HIGH_SPEED;
 
 
     ret = sys_init(INIT_DEVACCESS, &up, &desc_up);
@@ -438,7 +429,7 @@ int _main(uint32_t task_id)
     printf("%s\n", wellcome_msg);
     wmalloc_init();
 
-    //declare_userpresence_backend();
+    declare_userpresence_backend();
     int parser_msq = 0;
 
     /* Posix SystemV message queue init */
@@ -520,6 +511,11 @@ int _main(uint32_t task_id)
 
     while(token_initialized == false){};
 
+    /* Open FIDO session with token */
+    if(fido_open_session()){
+        log_printf("[FIDO] cannot open FIDO session with the token\n");
+        goto err;
+    }
     size_t msgsz = 64;
     do {
         msqr = msgrcv(parser_msq, &mbuf, msgsz, MAGIC_WINK_REQ, IPC_NOWAIT);
