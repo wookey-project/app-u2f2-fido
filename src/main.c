@@ -283,6 +283,7 @@ err:
 }
 
 void smartcard_removal_action(void){
+    printf("smartcard removed !!!\n");
     /* Check if smartcard has been removed, and reboot if yes */
     if((fido_get_token_channel()->card.type != SMARTCARD_UNKNOWN) && !SC_is_smartcard_inserted(&(fido_get_token_channel()->card))){
         SC_smartcard_lost(&(fido_get_token_channel()->card));
@@ -391,6 +392,8 @@ void wink_down(void)
 
 static mbed_error_t declare_userpresence_backend(void)
 {
+    // PTH FIX: this should be associated to u2fPIN informational screen
+#if 0
     uint8_t ret;
     /* Button + LEDs */
     memset (&up, 0, sizeof (up));
@@ -412,6 +415,7 @@ static mbed_error_t declare_userpresence_backend(void)
     if (ret == SYS_E_DONE) {
         return MBED_ERROR_NONE;
     }
+#endif
     return MBED_ERROR_UNKNOWN;
 }
 
