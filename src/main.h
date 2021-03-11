@@ -10,7 +10,7 @@
 #endif
 
 
-int get_pin_msq(void);
+int get_u2fpin_msq(void);
 
 /* exported utilities */
 void wink_up(void);

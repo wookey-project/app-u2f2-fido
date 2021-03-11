@@ -7,11 +7,12 @@
 #include "libc/string.h"
 #include "libc/syscall.h"
 
+#include "libtoken_auth.h"
 #include "libfido.h"
-
 #include "handlers.h"
 #include "main.h"
 
+#include "generated/bsram_keybag.h"
 
 mbed_error_t handle_wink(uint16_t timeout_ms, int usb_msq)
 {
@@ -146,13 +147,6 @@ err:
 
 volatile bool button_pushed = false;
 
-void exti_button_handler (void)
-{
-    button_pushed = true;
-}
-
-
-
 bool handle_userpresence_backend(uint16_t timeout)
 {
     /* wait half of duration and return ok by now */
@@ -160,9 +154,7 @@ bool handle_userpresence_backend(uint16_t timeout)
     /* TODO: this should be timeouted here */
     timeout = timeout;
 
-    send_signal_with_acknowledge(get_pin_msq(), MAGIC_USER_PRESENCE_REQ, MAGIC_USER_PRESENCE_ACK);
+    send_signal_with_acknowledge(get_u2fpin_msq(), MAGIC_USER_PRESENCE_REQ, MAGIC_USER_PRESENCE_ACK);
     button_pushed = true;
     return button_pushed;
 }
-
-

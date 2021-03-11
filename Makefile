@@ -31,6 +31,10 @@ APP_BUILD_DIR = $(BUILD_DIR)/apps/$(DIR_NAME)
 CFLAGS := $(APPS_CFLAGS)
 # Application CFLAGS...
 CFLAGS += -Isrc/ -MMD -MP -O3
+# fido app uses the specialized FIDO profile (adding specific dedicated AUTH commands)
+ifeq ($(CONFIG_PROJ_NAME),"u2f2")
+CFLAGS += -DFIDO_PROFILE
+endif
 
 ###################################################################
 # About the link step
@@ -40,11 +44,7 @@ CFLAGS += -Isrc/ -MMD -MP -O3
 # linker options to add the layout file
 LDFLAGS += $(EXTRA_LDFLAGS) -L$(APP_BUILD_DIR)
 # project's library you whish to use...
-
-# we use start group and end group because usbotghs and usbctrl have inter
-# dependencies, requiring the linker to resolve their respective symbols
-# each time
-LD_LIBS += -Wl,--start-group -Wl,-lu2f2 -Wl,-lfido -Wl,-lhmac -Wl,-lsign -Wl,--end-group -Wl,-lstd
+LD_LIBS += -ltoken -lsmartcard -liso7816 -ldrviso7816 -lusart -laes -lcryp -lhmac -lstd -lsign -lu2f2 -lfido -Wl,--no-whole-archive
 
 ###################################################################
 # okay let's list our source files and generated files now
