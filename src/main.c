@@ -29,6 +29,18 @@ static token_channel *fido_get_token_channel(void)
     return &curr_token_channel;
 }
 
+
+/* We save our secure channel mounting keys */
+unsigned char decrypted_token_pub_key_data[EC_STRUCTURED_PUB_KEY_MAX_EXPORT_SIZE] = { 0 };
+unsigned char decrypted_platform_priv_key_data[EC_STRUCTURED_PRIV_KEY_MAX_EXPORT_SIZE] = { 0 };
+unsigned char decrypted_platform_pub_key_data[EC_STRUCTURED_PUB_KEY_MAX_EXPORT_SIZE] = { 0 };
+databag saved_decrypted_keybag[] = {
+    { .data = decrypted_token_pub_key_data, .size = sizeof(decrypted_token_pub_key_data) },
+    { .data = decrypted_platform_priv_key_data, .size = sizeof(decrypted_platform_priv_key_data) },
+    { .data = decrypted_platform_pub_key_data, .size = sizeof(decrypted_platform_pub_key_data) },
+};
+
+
 /*****************************************************************************************************/
 /*****************************************************************************************************/
 /*****************************************************************************************************/
@@ -44,10 +56,14 @@ int fido_open_session(void)
 		goto err;
 	}
 
+printf("===> !!! FIDO SESSION OPENED OK!\n");
 	return 0;
 err:
+printf("===> !!! FIDO SESSION NOT OPENED\n");
 	return -1;
 }
+
+int wrap_auth_token_exchanges(token_channel *channel, cb_token_callbacks *callbacks, bool do_use_saved_pins);
 
 /**** Handle the tokens callbacks ****/
 int callback_fido_register(const uint8_t *app_data, uint16_t app_data_len, uint8_t *key_handle, uint16_t *key_handle_len, uint8_t *ecdsa_priv_key, uint16_t *ecdsa_priv_key_len){
@@ -56,8 +72,26 @@ int callback_fido_register(const uint8_t *app_data, uint16_t app_data_len, uint8
 	}
 	unsigned int _key_handle_len = *key_handle_len;
 	unsigned int _ecdsa_priv_key_len = *ecdsa_priv_key_len;
-	if(auth_token_fido_register(fido_get_token_channel(), app_data, app_data_len, key_handle, &_key_handle_len, ecdsa_priv_key, &_ecdsa_priv_key_len)){
-		goto err;
+	while(auth_token_fido_register(fido_get_token_channel(), app_data, app_data_len, key_handle, &_key_handle_len, ecdsa_priv_key, &_ecdsa_priv_key_len)){
+printf("===> auth_token_fido_register failed ...\n");
+#if 0
+		/* Try to renegotiate */
+		ec_curve_type curve = fido_get_token_channel()->curve;
+                token_zeroize_secure_channel(fido_get_token_channel());
+                unsigned int remaining_tries = 0;
+                if(token_secure_channel_init(fido_get_token_channel(), saved_decrypted_keybag[1].data, saved_decrypted_keybag[1].size, saved_decrypted_keybag[2].data, saved_decrypted_keybag[2].size, saved_decrypted_keybag[0].data, saved_decrypted_keybag[0].size, curve, &remaining_tries)){
+		    printf("[APP FIDO] secure channel renegotiate failed ...\n");
+#endif
+		    /* Reinitialize our token */
+                    token_zeroize_secure_channel(fido_get_token_channel());
+		    while(wrap_auth_token_exchanges(fido_get_token_channel(), NULL, true)){
+		        printf("[APP FIDO] token reinit failed ...\n");
+                    }
+#if 0
+                }
+#endif
+              _key_handle_len = *key_handle_len;
+              _ecdsa_priv_key_len = *ecdsa_priv_key_len;
 	}
 	if(_key_handle_len > (unsigned int)0xFFFF){
 		goto err;
@@ -81,19 +115,53 @@ err:
 
 int callback_fido_authenticate(const uint8_t *app_data, uint16_t app_data_len, const uint8_t *key_handle, uint16_t key_handle_len, uint8_t *ecdsa_priv_key, uint16_t *ecdsa_priv_key_len, uint8_t check_only){
 	unsigned int _ecdsa_priv_key_len = 0;
+	bool check_result = false;
 
 	if((check_only == 0) && (ecdsa_priv_key_len == NULL)){
 		goto err;
 	}
 	if(check_only != 0){
-		if(auth_token_fido_authenticate(fido_get_token_channel(), app_data, app_data_len, key_handle, key_handle_len, NULL, NULL, check_only)){
-			goto err;
+		while(auth_token_fido_authenticate(fido_get_token_channel(), app_data, app_data_len, key_handle, key_handle_len, NULL, NULL, check_only, &check_result)){
+printf("===> auth_token_fido_authenticate failed1 ...\n");
+#if 0
+			/* Try to renegotiate */
+		        ec_curve_type curve = fido_get_token_channel()->curve;
+        	        token_zeroize_secure_channel(fido_get_token_channel());
+                	unsigned int remaining_tries = 0;
+	                if(token_secure_channel_init(fido_get_token_channel(), saved_decrypted_keybag[1].data, saved_decrypted_keybag[1].size, saved_decrypted_keybag[2].data, saved_decrypted_keybag[2].size, saved_decrypted_keybag[0].data, saved_decrypted_keybag[0].size, curve, &remaining_tries)){
+  		            printf("[APP FIDO] secure channel renegotiate failed ...\n");
+#endif
+   		            /* Reinitialize our token */
+        	            token_zeroize_secure_channel(fido_get_token_channel());
+      		            while(wrap_auth_token_exchanges(fido_get_token_channel(), NULL, true)){
+		                printf("[APP FIDO] token reinit failed ...\n");
+                            }
+#if 0
+                	}
+#endif
 		}
 	}
 	else{
 		_ecdsa_priv_key_len = *ecdsa_priv_key_len;
-		if(auth_token_fido_authenticate(fido_get_token_channel(), app_data, app_data_len, key_handle, key_handle_len, ecdsa_priv_key, &_ecdsa_priv_key_len, check_only)){
-			goto err;
+		while(auth_token_fido_authenticate(fido_get_token_channel(), app_data, app_data_len, key_handle, key_handle_len, ecdsa_priv_key, &_ecdsa_priv_key_len, check_only, &check_result)){
+printf("===> auth_token_fido_authenticate failed2 ...\n");
+#if 0
+			/* Try to renegotiate */
+		        ec_curve_type curve = fido_get_token_channel()->curve;
+        	        token_zeroize_secure_channel(fido_get_token_channel());
+                	unsigned int remaining_tries = 0;
+	                if(token_secure_channel_init(fido_get_token_channel(), saved_decrypted_keybag[1].data, saved_decrypted_keybag[1].size, saved_decrypted_keybag[2].data, saved_decrypted_keybag[2].size, saved_decrypted_keybag[0].data, saved_decrypted_keybag[0].size, curve, &remaining_tries)){
+  		            printf("[APP FIDO] secure channel renegotiate failed ...\n");
+#endif
+   		            /* Reinitialize our token */
+        	            token_zeroize_secure_channel(fido_get_token_channel());
+      		            while(wrap_auth_token_exchanges(fido_get_token_channel(), NULL, true)){
+		                printf("[APP FIDO] token reinit failed ...\n");
+                            }
+#if 0
+                	}
+#endif
+		    _ecdsa_priv_key_len = *ecdsa_priv_key_len;
 		}
 		if(_ecdsa_priv_key_len > (unsigned int)0xFFFF){
 			goto err;
@@ -101,6 +169,10 @@ int callback_fido_authenticate(const uint8_t *app_data, uint16_t app_data_len, c
 		*ecdsa_priv_key_len = _ecdsa_priv_key_len;
 	}
 
+        if(check_result == false){
+            /* Something wrong happened when checking */
+            goto err;
+        }
 	return 0;
 err:
 	if(ecdsa_priv_key_len != NULL){
@@ -181,9 +253,10 @@ int get_u2fpin_msq(void) {
 
 /* Cached credentials */
 char global_user_pin[32] = { 0 };
-unsigned int global_user_pin_len = 0;
+volatile unsigned int global_user_pin_len = 0;
 char global_pet_pin[32] = { 0 };
-unsigned int global_pet_pin_len = 0;
+volatile unsigned int global_pet_pin_len = 0;
+volatile bool use_saved_pins = false;
 
 unsigned char sdpwd[16] = { 0 };
 
@@ -191,6 +264,29 @@ int auth_token_request_pin(char *pin, unsigned int *pin_len, token_pin_types pin
 {
     msg_mtext_union_t data = { 0 };
     size_t data_len = sizeof(msg_mtext_union_t);
+
+printf("===> auth_token_request_pin\n");
+    if(use_saved_pins == true){
+printf("EMULATE!!\n");
+        if(pin_type == TOKEN_PET_PIN){
+            if(global_pet_pin_len > *pin_len){
+                goto err;
+            }
+            memcpy(pin, global_pet_pin, global_pet_pin_len);
+            *pin_len = global_pet_pin_len;
+        }
+        else if(pin_type == TOKEN_USER_PIN){
+            if(global_user_pin_len > *pin_len){
+                goto err;
+            }
+            memcpy(pin, global_user_pin, global_user_pin_len);
+            *pin_len = global_user_pin_len;
+        }
+        else{
+            goto err;
+        }
+        return 0;
+    }
 
     if(action == TOKEN_PIN_AUTHENTICATE){
         if(pin_type == TOKEN_PET_PIN){
@@ -248,12 +344,14 @@ err:
 
 int auth_token_acknowledge_pin(__attribute__((unused)) token_ack_state ack, __attribute__((unused)) token_pin_types pin_type, __attribute__((unused)) token_pin_actions action, __attribute__((unused)) uint32_t remaining_tries)
 {
+printf("===> auth_token_acknowledge_pin\n");
     /* FIXME: TODO: */
     return 0;
 }
 
 int auth_token_request_pet_name(__attribute__((unused)) char *pet_name,  __attribute__((unused))unsigned int *pet_name_len)
 {
+printf("===> auth_token_request_pet_name\n");
     /* FIXME: TODO: */
     return 0;
 }
@@ -262,9 +360,13 @@ int auth_token_request_pet_name_confirmation(const char *pet_name, unsigned int 
 {
     msg_mtext_union_t data = { 0 };
     size_t data_len = 0;
-
+printf("====> auth_token_request_pet_name_confirmation\n");
     if(pet_name == NULL){
         goto err;
+    }
+    if(use_saved_pins == true){
+printf("EMULATE!!\n");
+        return 0;
     }
     strncpy(&data.c[0], pet_name, pet_name_len);
     data_len = pet_name_len;
@@ -290,12 +392,100 @@ void smartcard_removal_action(void){
     }
 }
 
+
+unsigned char MASTER_secret[32] = {0};
+unsigned char MASTER_secret_h[32] = {0};
+
+static volatile bool token_initialized = false;
+
+int wrap_auth_token_exchanges(token_channel *channel, cb_token_callbacks *callbacks, bool do_use_saved_pins)
+{
+    token_initialized = false;
+
+    use_saved_pins = do_use_saved_pins;
+
+    /*********************************************
+     * AUTH token communication, to get key from it
+     *********************************************/
+#ifdef CONFIG_APP_FIDO_USE_BKUP_SRAM
+    /* Map the Backup SRAM to get our keybags*/
+    if(bsram_keybag_map()){
+        goto err;
+    }
+#endif
+
+    /* Register smartcard removal handler */
+    channel->card.type = SMARTCARD_CONTACT;
+    /* Register our callback */
+    ADD_LOC_HANDLER(smartcard_removal_action)
+    SC_register_user_handler_action(&(channel->card), smartcard_removal_action);
+    channel->card.type = SMARTCARD_UNKNOWN;
+
+    /* Token default callbacks */
+    cb_token_callbacks auth_token_callbacks = {
+        .request_pin                   = auth_token_request_pin,
+        .acknowledge_pin               = auth_token_acknowledge_pin,
+        .request_pet_name              = auth_token_request_pet_name,
+        .request_pet_name_confirmation = auth_token_request_pet_name_confirmation
+    };
+
+    cb_token_callbacks *cb;
+    if(callbacks == NULL){
+        cb = &auth_token_callbacks;
+        /* Register our calbacks */
+        ADD_LOC_HANDLER(auth_token_request_pin)
+        ADD_LOC_HANDLER(auth_token_acknowledge_pin)
+        ADD_LOC_HANDLER(auth_token_request_pet_name)
+        ADD_LOC_HANDLER(auth_token_request_pet_name_confirmation)
+    }
+    else{
+        cb = callbacks;
+    }
+    unsigned int retries = 0;
+again:
+    memset(MASTER_secret, 0, sizeof(MASTER_secret));
+    memset(MASTER_secret_h, 0,  sizeof(MASTER_secret_h));
+    memset(sdpwd, 0, sizeof(sdpwd));
+    if(auth_token_exchanges(channel, cb, MASTER_secret, sizeof(MASTER_secret), MASTER_secret_h, sizeof(MASTER_secret_h), sdpwd, sizeof(sdpwd), saved_decrypted_keybag, sizeof(saved_decrypted_keybag)/sizeof(databag)))
+    {
+        retries++;
+        if(retries > 4){
+            goto err;
+        }
+        goto again;
+    }
+    /* Less retries for better reactivity */
+    channel->error_recovery_max_send_retries = 2;
+
+#if CONFIG_SMARTCARD_DEBUG
+    printf("key received:\n");
+    hexdump(MASTER_secret, 32);
+    printf("hash received:\n");
+    hexdump(MASTER_secret_h, 32);
+#endif
+
+    /* Open FIDO session with token */
+    if(fido_open_session()){
+        log_printf("[FIDO] cannot open FIDO session with the token\n");
+        goto err;
+    }
+
+    token_initialized = true;
+    do_use_saved_pins = false;
+
+    return 0;
+err:
+    do_use_saved_pins = false;
+    return -1;
+}
+
+
+
 device_t    up;
 int    desc_up = 0;
 
 int parser_msq = 0;
 
-static volatile bool token_initialized = false;
 mbed_error_t unlock_u2f2(void)
 {
     mbed_error_t errcode = MBED_ERROR_NONE;
@@ -310,53 +500,13 @@ mbed_error_t unlock_u2f2(void)
         goto err;
     }
 
-    /*********************************************
-     * AUTH token communication, to get key from it
-     *********************************************/
-#ifdef CONFIG_APP_FIDO_USE_BKUP_SRAM
-    /* Map the Backup SRAM to get our keybags*/
-    if(bsram_keybag_map()){
+    if(wrap_auth_token_exchanges(fido_get_token_channel(), NULL, false)){
+        printf("[FIDO APP] failed when discussing with the token\n");
         errcode = MBED_ERROR_UNKNOWN;
         goto err;
     }
-#endif
-    unsigned char MASTER_secret[32] = {0};
-    unsigned char MASTER_secret_h[32] = {0};
-
-    /* Register smartcard removal handler */
-    fido_get_token_channel()->card.type = SMARTCARD_CONTACT;
-    /* Register our callback */
-    ADD_LOC_HANDLER(smartcard_removal_action)
-    SC_register_user_handler_action(&(fido_get_token_channel()->card), smartcard_removal_action);
-    fido_get_token_channel()->card.type = SMARTCARD_UNKNOWN;
-
-    /* Token callbacks */
-    cb_token_callbacks auth_token_callbacks = {
-        .request_pin                   = auth_token_request_pin,
-        .acknowledge_pin               = auth_token_acknowledge_pin,
-        .request_pet_name              = auth_token_request_pet_name,
-        .request_pet_name_confirmation = auth_token_request_pet_name_confirmation
-    };
-    /* Register our calbacks */
-    ADD_LOC_HANDLER(auth_token_request_pin)
-    ADD_LOC_HANDLER(auth_token_acknowledge_pin)
-    ADD_LOC_HANDLER(auth_token_request_pet_name)
-    ADD_LOC_HANDLER(auth_token_request_pet_name_confirmation)
-    if(auth_token_exchanges(fido_get_token_channel(), &auth_token_callbacks, MASTER_secret, sizeof(MASTER_secret), MASTER_secret_h, sizeof(MASTER_secret_h), sdpwd, sizeof(sdpwd), NULL, 0))
-    {
-        errcode = MBED_ERROR_UNKNOWN;
-        goto err;
-    }
-
-#if CONFIG_SMARTCARD_DEBUG
-    printf("key received:\n");
-    hexdump(MASTER_secret, 32);
-    printf("hash received:\n");
-    hexdump(MASTER_secret_h, 32);
-#endif
     /* ... and acknowledge frontend
      */
-   token_initialized = true;
 
 err:
     return errcode;
@@ -511,11 +661,6 @@ int _main(uint32_t task_id)
 
     while(token_initialized == false){};
 
-    /* Open FIDO session with token */
-    if(fido_open_session()){
-        log_printf("[FIDO] cannot open FIDO session with the token\n");
-        goto err;
-    }
     size_t msgsz = 64;
     do {
         msqr = msgrcv(parser_msq, &mbuf, msgsz, MAGIC_WINK_REQ, IPC_NOWAIT);
