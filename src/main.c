@@ -17,10 +17,14 @@
 #include "main.h"
 #include "handlers.h"
 
+#include "libc/random.h"
+
 #include "libtoken_auth.h"
 #include "libfido.h"
 #include "generated/bsram_keybag.h"
 
+//#define UNSAFE_LOCAL_KEY_HANDLE_GENERATION
+#include "AUTH/FIDO/attestation_key.der.h"
 
 static token_channel curr_token_channel = { .channel_initialized = 0, .secure_channel = 0, .IV = { 0 }, .first_IV = { 0 }, .AES_key = { 0 }, .HMAC_key = { 0 }, .pbkdf2_iterations = 0, .platform_salt_len = 0 };
 
@@ -46,23 +50,40 @@ databag saved_decrypted_keybag[] = {
 /*****************************************************************************************************/
 /************************** Interactions with the AUTH token applet FIDO part ************************/
 /**** Open a FIDO session by sending our sectret ***/
+#ifndef UNSAFE_LOCAL_KEY_HANDLE_GENERATION
+unsigned char fido_attestation_privkey[FIDO_PRIV_KEY_SIZE] = { 0 };
+
 int fido_open_session(void)
 {
-	uint8_t pkey[32] = { 0 };
+	uint8_t pkey[SHA256_DIGEST_SIZE];
+        sha256_context sha256_ctx;
+	unsigned int hpriv_key_len = (FIDO_PRIV_KEY_SIZE / 2);
+	
+	/* The FIDO derivation secret on our end is the hash of our decrypted platform keys */
+        sha256_init(&sha256_ctx);
+        sha256_update(&sha256_ctx, (const uint8_t*)decrypted_token_pub_key_data, sizeof(decrypted_token_pub_key_data));
+        sha256_update(&sha256_ctx, (const uint8_t*)decrypted_platform_priv_key_data, sizeof(decrypted_platform_priv_key_data));
+        sha256_update(&sha256_ctx, (const uint8_t*)decrypted_platform_pub_key_data, sizeof(decrypted_platform_pub_key_data));	
+        sha256_final(&sha256_ctx, pkey);
+
 	if(fido_get_token_channel()->channel_initialized != 1){
 		goto err;
 	}
-	if(auth_token_fido_send_pkey(fido_get_token_channel(), pkey, sizeof(pkey))){
+	if(auth_token_fido_send_pkey(fido_get_token_channel(), pkey, sizeof(pkey), fido_attestation_privkey + (FIDO_PRIV_KEY_SIZE / 2), &hpriv_key_len)){
 		goto err;
 	}
-
-printf("===> !!! FIDO SESSION OPENED OK!\n");
+	/* Copy other half private key */
+	memcpy(fido_attestation_privkey, fido_attestation_halfprivkey, FIDO_PRIV_KEY_SIZE / 2);
+//printf("===> !!! FIDO SESSION OPENED OK!\n");
 	return 0;
 err:
-printf("===> !!! FIDO SESSION NOT OPENED\n");
+//printf("===> !!! FIDO SESSION NOT OPENED\n");
 	return -1;
 }
 
+#endif
+
+#define MAX_RETRIES 10
 int wrap_auth_token_exchanges(token_channel *channel, cb_token_callbacks *callbacks, bool do_use_saved_pins);
 
 /**** Handle the tokens callbacks ****/
@@ -70,10 +91,16 @@ int callback_fido_register(const uint8_t *app_data, uint16_t app_data_len, uint8
 	if((key_handle_len == NULL) || (ecdsa_priv_key_len == NULL)){
 		goto err;
 	}
+	unsigned int retries_reg = 0;
+	unsigned int retries_wrap = 0;
 	unsigned int _key_handle_len = *key_handle_len;
 	unsigned int _ecdsa_priv_key_len = *ecdsa_priv_key_len;
 	while(auth_token_fido_register(fido_get_token_channel(), app_data, app_data_len, key_handle, &_key_handle_len, ecdsa_priv_key, &_ecdsa_priv_key_len)){
-printf("===> auth_token_fido_register failed ...\n");
+//printf("===> auth_token_fido_register failed ...\n");
+		if(retries_reg > MAX_RETRIES){
+			goto err;
+		}
+		retries_reg++;
 #if 0
 		/* Try to renegotiate */
 		ec_curve_type curve = fido_get_token_channel()->curve;
@@ -86,6 +113,10 @@ printf("===> auth_token_fido_register failed ...\n");
                     token_zeroize_secure_channel(fido_get_token_channel());
 		    while(wrap_auth_token_exchanges(fido_get_token_channel(), NULL, true)){
 		        printf("[APP FIDO] token reinit failed ...\n");
+  	                if(retries_wrap > MAX_RETRIES){
+			    goto err;
+		        }
+  	 	        retries_wrap++;
                     }
 #if 0
                 }
@@ -117,12 +148,19 @@ int callback_fido_authenticate(const uint8_t *app_data, uint16_t app_data_len, c
 	unsigned int _ecdsa_priv_key_len = 0;
 	bool check_result = false;
 
+	unsigned int retries_auth = 0;
+	unsigned int retries_wrap = 0;
+
 	if((check_only == 0) && (ecdsa_priv_key_len == NULL)){
 		goto err;
 	}
 	if(check_only != 0){
 		while(auth_token_fido_authenticate(fido_get_token_channel(), app_data, app_data_len, key_handle, key_handle_len, NULL, NULL, check_only, &check_result)){
 printf("===> auth_token_fido_authenticate failed1 ...\n");
+ 		        if(retries_auth > MAX_RETRIES){
+			    goto err;
+  		        }
+ 		        retries_auth++;
 #if 0
 			/* Try to renegotiate */
 		        ec_curve_type curve = fido_get_token_channel()->curve;
@@ -135,6 +173,10 @@ printf("===> auth_token_fido_authenticate failed1 ...\n");
         	            token_zeroize_secure_channel(fido_get_token_channel());
       		            while(wrap_auth_token_exchanges(fido_get_token_channel(), NULL, true)){
 		                printf("[APP FIDO] token reinit failed ...\n");
+  		                if(retries_wrap > MAX_RETRIES){
+			            goto err;
+  		                }
+  		                retries_wrap++;
                             }
 #if 0
                 	}
@@ -145,6 +187,10 @@ printf("===> auth_token_fido_authenticate failed1 ...\n");
 		_ecdsa_priv_key_len = *ecdsa_priv_key_len;
 		while(auth_token_fido_authenticate(fido_get_token_channel(), app_data, app_data_len, key_handle, key_handle_len, ecdsa_priv_key, &_ecdsa_priv_key_len, check_only, &check_result)){
 printf("===> auth_token_fido_authenticate failed2 ...\n");
+ 		        if(retries_auth > MAX_RETRIES){
+			    goto err;
+  		        }
+ 		        retries_auth++;
 #if 0
 			/* Try to renegotiate */
 		        ec_curve_type curve = fido_get_token_channel()->curve;
@@ -157,6 +203,10 @@ printf("===> auth_token_fido_authenticate failed2 ...\n");
         	            token_zeroize_secure_channel(fido_get_token_channel());
       		            while(wrap_auth_token_exchanges(fido_get_token_channel(), NULL, true)){
 		                printf("[APP FIDO] token reinit failed ...\n");
+  		                if(retries_wrap > MAX_RETRIES){
+			            goto err;
+  		                }
+  		                retries_wrap++;
                             }
 #if 0
                 	}
@@ -265,9 +315,9 @@ int auth_token_request_pin(char *pin, unsigned int *pin_len, token_pin_types pin
     msg_mtext_union_t data = { 0 };
     size_t data_len = sizeof(msg_mtext_union_t);
 
-printf("===> auth_token_request_pin\n");
+//printf("===> auth_token_request_pin\n");
     if(use_saved_pins == true){
-printf("EMULATE!!\n");
+//printf("EMULATE!!\n");
         if(pin_type == TOKEN_PET_PIN){
             if(global_pet_pin_len > *pin_len){
                 goto err;
@@ -344,14 +394,14 @@ err:
 
 int auth_token_acknowledge_pin(__attribute__((unused)) token_ack_state ack, __attribute__((unused)) token_pin_types pin_type, __attribute__((unused)) token_pin_actions action, __attribute__((unused)) uint32_t remaining_tries)
 {
-printf("===> auth_token_acknowledge_pin\n");
+//printf("===> auth_token_acknowledge_pin\n");
     /* FIXME: TODO: */
     return 0;
 }
 
 int auth_token_request_pet_name(__attribute__((unused)) char *pet_name,  __attribute__((unused))unsigned int *pet_name_len)
 {
-printf("===> auth_token_request_pet_name\n");
+//printf("===> auth_token_request_pet_name\n");
     /* FIXME: TODO: */
     return 0;
 }
@@ -360,12 +410,12 @@ int auth_token_request_pet_name_confirmation(const char *pet_name, unsigned int 
 {
     msg_mtext_union_t data = { 0 };
     size_t data_len = 0;
-printf("====> auth_token_request_pet_name_confirmation\n");
+//printf("====> auth_token_request_pet_name_confirmation\n");
     if(pet_name == NULL){
         goto err;
     }
     if(use_saved_pins == true){
-printf("EMULATE!!\n");
+//printf("EMULATE!!\n");
         return 0;
     }
     strncpy(&data.c[0], pet_name, pet_name_len);
@@ -463,13 +513,17 @@ again:
     hexdump(MASTER_secret, 32);
     printf("hash received:\n");
     hexdump(MASTER_secret_h, 32);
+    printf("sdpwd received:\n");
+    hexdump(sdpwd, 16);
 #endif
 
+#ifndef UNSAFE_LOCAL_KEY_HANDLE_GENERATION
     /* Open FIDO session with token */
     if(fido_open_session()){
         log_printf("[FIDO] cannot open FIDO session with the token\n");
         goto err;
     }
+#endif
 
     token_initialized = true;
     do_use_saved_pins = false;
@@ -575,6 +629,12 @@ static mbed_error_t declare_userpresence_backend(void)
  */
 int _main(uint32_t task_id)
 {
+    /* [RB] NOTE: we switch random generation to non secure here mainly
+     * for *performance* reasons! This should however not have much impact
+     * on security, since we still rely on the platform TRNG.
+     */
+    random_secure = SEC_RANDOM_NONSECURE;
+
     task_id = task_id;
     e_syscall_ret ret = 0;
     char *wellcome_msg = "hello, I'm USB HID frontend";

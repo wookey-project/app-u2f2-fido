@@ -31,6 +31,8 @@ APP_BUILD_DIR = $(BUILD_DIR)/apps/$(DIR_NAME)
 CFLAGS := $(APPS_CFLAGS)
 # Application CFLAGS...
 CFLAGS += -Isrc/ -MMD -MP -O3
+# App fido needs private key access. This access should be declared voluntary in makefiles
+CFLAGS += -I$(PRIVATE_DIR)
 # fido app uses the specialized FIDO profile (adding specific dedicated AUTH commands)
 ifeq ($(CONFIG_PROJ_NAME),"u2f2")
 CFLAGS += -DFIDO_PROFILE
