@@ -678,19 +678,12 @@ int _main(uint32_t task_id)
             printf("error while declaring USART\n");
             goto err;
             break;
-#if 0
-        // PTH: this return value does not exist in the call graph. Only declarative part here
-        case 3:
-            printf("error while init smartcard\n");
-            break;
-#endif
         default:
             printf("unknown error while init smartcard\n");
             goto err;
     }
 #ifdef CONFIG_APP_FIDO_USE_BKUP_SRAM
     if(bsram_keybag_init()){
-        errcode = MBED_ERROR_UNKNOWN;
         goto err;
     }
 #endif
