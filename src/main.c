@@ -58,12 +58,12 @@ int fido_open_session(void)
 	uint8_t pkey[SHA256_DIGEST_SIZE];
         sha256_context sha256_ctx;
 	unsigned int hpriv_key_len = (FIDO_PRIV_KEY_SIZE / 2);
-	
+
 	/* The FIDO derivation secret on our end is the hash of our decrypted platform keys */
         sha256_init(&sha256_ctx);
         sha256_update(&sha256_ctx, (const uint8_t*)decrypted_token_pub_key_data, sizeof(decrypted_token_pub_key_data));
         sha256_update(&sha256_ctx, (const uint8_t*)decrypted_platform_priv_key_data, sizeof(decrypted_platform_priv_key_data));
-        sha256_update(&sha256_ctx, (const uint8_t*)decrypted_platform_pub_key_data, sizeof(decrypted_platform_pub_key_data));	
+        sha256_update(&sha256_ctx, (const uint8_t*)decrypted_platform_pub_key_data, sizeof(decrypted_platform_pub_key_data));
         sha256_final(&sha256_ctx, pkey);
 
 	if(fido_get_token_channel()->channel_initialized != 1){
@@ -562,6 +562,9 @@ mbed_error_t unlock_u2f2(void)
     }
     /* ... and acknowledge frontend
      */
+    struct msgbuf msgbuf = { 0 };
+    msgbuf.mtype = MAGIC_TOKEN_UNLOCKED;
+    msgsnd(u2fpin_msq, &msgbuf, 0, 0);
 
 err:
     return errcode;
