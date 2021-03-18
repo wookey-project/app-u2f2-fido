@@ -31,6 +31,8 @@ APP_BUILD_DIR = $(BUILD_DIR)/apps/$(DIR_NAME)
 CFLAGS := $(APPS_CFLAGS)
 # Application CFLAGS...
 CFLAGS += -Isrc/ -MMD -MP -O3
+# libfido needs libecc
+CFLAGS += -I$(PROJ_FILES)/externals/libecc/src $(EXTERNAL_CFLAGS) $(LIBSIGN_CFLAGS)
 # App fido needs private key access. This access should be declared voluntary in makefiles
 CFLAGS += -I$(PRIVATE_DIR)
 # fido app uses the specialized FIDO profile (adding specific dedicated AUTH commands)
