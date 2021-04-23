@@ -6,6 +6,7 @@
 #include "libc/nostd.h"
 #include "libc/string.h"
 #include "libc/syscall.h"
+#include "libc/malloc.h"
 
 #include "libtoken_auth.h"
 #include "libfido.h"
@@ -147,14 +148,57 @@ err:
 
 volatile bool button_pushed = false;
 
-bool handle_userpresence_backend(uint16_t timeout)
+
+/*
+ * Call for both register & authenticate
+ */
+
+bool handle_userpresence_backend(uint16_t timeout, uint8_t *appid)
 {
+    //mbed_error_t errcode = MBED_ERROR_NONE;
     /* wait half of duration and return ok by now */
     button_pushed = false;
-    /* TODO: this should be timeouted here */
-    timeout = timeout;
+    fidostorage_appid_slot_t    appid_info = { 0 };
+    uint8_t **icon = NULL;
 
-    send_signal_with_acknowledge(get_u2fpin_msq(), MAGIC_USER_PRESENCE_REQ, MAGIC_USER_PRESENCE_ACK);
-    button_pushed = true;
+    if (appid == NULL) {
+        goto err;
+    }
+    struct msgbuf msgbuf = { 0 };
+
+    printf("[fido] user presence, timeout is %d ms\n", timeout);
+    /* first, get back info from storage, based on appid */
+
+
+    printf("[fido] requesting metadata from storage\n");
+    request_appid_metada(get_storage_msq(), appid, &appid_info, icon);
+    /* all metata received */
+
+    printf("[fido] metadata received from storage, sending USER_PRESENCE_REQ to u2fpin\n");
+    /* send userpresence request to u2fPIN and wait for METADATA request in response */
+    msgbuf.mtext.u16[0] = timeout;
+    /* sending appid */
+    msgbuf.mtype = MAGIC_USER_PRESENCE_REQ,
+    msgsnd(get_u2fpin_msq(), &msgbuf, 32, 0);
+    /* waiting for get_metadata() as a response */
+    printf("[fido] now waiting for get_metadata reception from u2fpin\n");
+    msgrcv(get_u2fpin_msq(), &msgbuf.mtext, 64, MAGIC_STORAGE_GET_METADATA, 0);
+    printf("[fido] received get_metadata from u2fpin, sending appid metadata\n");
+    /* now that GET_METADATA is received from U2FPin, sending metadata to it */
+    send_appid_metadata(get_u2fpin_msq(), appid, &appid_info, *icon);
+
+    printf("[fido] appid metadata sent, cleaning...\n");
+    /* now wait for effective user acknowedge */
+    if (icon != NULL) {
+        wfree((void**)icon);
+    }
+
+    printf("[fido] waiting for User presence ACK to FIDO\n");
+    msgrcv(get_u2fpin_msq(), &msgbuf.mtext, 2, MAGIC_USER_PRESENCE_ACK, 0);
+    printf("[fido] user backend returned with %x!\n", msgbuf.mtext.u16[0]);
+    if (msgbuf.mtext.u16[0] == 0x4242) {
+        button_pushed = true;
+    }
+err:
     return button_pushed;
 }

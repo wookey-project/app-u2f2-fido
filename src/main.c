@@ -59,7 +59,7 @@ int fido_open_session(void)
 	uint8_t pkey[SHA256_DIGEST_SIZE];
         sha256_context sha256_ctx;
 	unsigned int hpriv_key_len = (FIDO_PRIV_KEY_SIZE / 2);
-	
+
 	/* The FIDO derivation secret on our end is the hash of our decrypted platform keys */
         sha256_init(&sha256_ctx);
         sha256_update(&sha256_ctx, (const uint8_t*)saved_decrypted_keybag[0].data, saved_decrypted_keybag[0].size);
@@ -295,6 +295,12 @@ int u2fpin_msq = 0;
 int get_u2fpin_msq(void) {
     return u2fpin_msq;
 }
+int storage_msq = 0;
+int get_storage_msq(void) {
+    return storage_msq;
+}
+
+
 
 /* Cached credentials */
 char global_user_pin[32] = { 0 };
@@ -643,6 +649,11 @@ int _main(uint32_t task_id)
         goto err;
     }
     u2fpin_msq = msgget("u2fpin", IPC_CREAT | IPC_EXCL);
+    if (u2fpin_msq == -1) {
+        printf("error while requesting SysV message queue. Errno=%x\n", errno);
+        goto err;
+    }
+    storage_msq = msgget("storage", IPC_CREAT | IPC_EXCL);
     if (u2fpin_msq == -1) {
         printf("error while requesting SysV message queue. Errno=%x\n", errno);
         goto err;

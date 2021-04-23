@@ -12,6 +12,8 @@
 
 int get_u2fpin_msq(void);
 
+int get_storage_msq(void);
+
 /* exported utilities */
 void wink_up(void);
 void wink_down(void);
