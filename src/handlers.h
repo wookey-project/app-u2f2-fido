@@ -11,7 +11,7 @@ mbed_error_t handle_wink(uint16_t timeout_ms, int usb_msq);
 
 mbed_error_t handle_fido_request(int usb_msq);
 
-bool handle_userpresence_backend(uint16_t timeout, uint8_t *appid);
+bool handle_userpresence_backend(uint16_t timeout, uint8_t *appid, u2f_fido_action action);
 
 /*
  * Low level handlers (HW events)

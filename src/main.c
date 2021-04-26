@@ -585,40 +585,6 @@ void wink_down(void)
 }
 
 
-/*********************************************************
- * Hardware-related declarations (backend handling)
- */
-
-static mbed_error_t declare_userpresence_backend(void)
-{
-    // PTH FIX: this should be associated to u2fPIN informational screen
-#if 0
-    uint8_t ret;
-    /* Button + LEDs */
-    memset (&up, 0, sizeof (up));
-
-    strncpy (up.name, "UsPre", sizeof (up.name));
-    up.gpio_num = 1; /* Number of configured GPIO */
-
-    up.gpios[0].kref.port = led1_dev_infos.gpios[LED0_BASE].port;
-    up.gpios[0].kref.pin = led1_dev_infos.gpios[LED0_BASE].pin;
-    up.gpios[0].mask     = GPIO_MASK_SET_MODE | GPIO_MASK_SET_PUPD |
-                                 GPIO_MASK_SET_TYPE | GPIO_MASK_SET_SPEED;
-    up.gpios[0].mode     = GPIO_PIN_OUTPUT_MODE;
-    up.gpios[0].pupd     = GPIO_PULLDOWN;
-    up.gpios[0].type     = GPIO_PIN_OTYPER_PP;
-    up.gpios[0].speed    = GPIO_PIN_HIGH_SPEED;
-
-
-    ret = sys_init(INIT_DEVACCESS, &up, &desc_up);
-    if (ret == SYS_E_DONE) {
-        return MBED_ERROR_NONE;
-    }
-#endif
-    return MBED_ERROR_UNKNOWN;
-}
-
-
 /*
  * Entrypoint
  */
@@ -638,7 +604,6 @@ int _main(uint32_t task_id)
     printf("%s\n", wellcome_msg);
     wmalloc_init();
 
-    declare_userpresence_backend();
     int parser_msq = 0;
 
     /* Posix SystemV message queue init */

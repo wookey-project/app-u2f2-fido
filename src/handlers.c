@@ -153,7 +153,7 @@ volatile bool button_pushed = false;
  * Call for both register & authenticate
  */
 
-bool handle_userpresence_backend(uint16_t timeout, uint8_t *appid)
+bool handle_userpresence_backend(uint16_t timeout, uint8_t *appid, u2f_fido_action action)
 {
     //mbed_error_t errcode = MBED_ERROR_NONE;
     /* wait half of duration and return ok by now */
@@ -170,7 +170,7 @@ bool handle_userpresence_backend(uint16_t timeout, uint8_t *appid)
     /* first, get back info from storage, based on appid */
 
 
-    printf("[fido] requesting metadata from storage\n");
+    printf("[fido] requesting metadata from storage for action %d\n", action);
     request_appid_metada(get_storage_msq(), appid, &appid_info, icon);
     /* all metata received */
 
