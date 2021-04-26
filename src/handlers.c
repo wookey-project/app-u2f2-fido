@@ -7,6 +7,7 @@
 #include "libc/string.h"
 #include "libc/syscall.h"
 #include "libc/malloc.h"
+#include "libfidostorage.h"
 
 #include "libtoken_auth.h"
 #include "libfido.h"
@@ -155,11 +156,11 @@ volatile bool button_pushed = false;
 
 bool handle_userpresence_backend(uint16_t timeout, uint8_t *appid, u2f_fido_action action)
 {
-    //mbed_error_t errcode = MBED_ERROR_NONE;
+    mbed_error_t errcode = MBED_ERROR_NONE;
     /* wait half of duration and return ok by now */
     button_pushed = false;
     fidostorage_appid_slot_t    appid_info = { 0 };
-    uint8_t **icon = NULL;
+    uint8_t *icon = NULL;
 
     if (appid == NULL) {
         goto err;
@@ -171,10 +172,16 @@ bool handle_userpresence_backend(uint16_t timeout, uint8_t *appid, u2f_fido_acti
 
 
     printf("[fido] requesting metadata from storage for action %d\n", action);
-    request_appid_metada(get_storage_msq(), appid, &appid_info, icon);
+    if ((errcode = request_appid_metada(get_storage_msq(), appid, &appid_info, &icon)) != MBED_ERROR_NONE) {
+        printf("[fido] failure while req storage for metadata: err=%x\n", errcode);
+        goto err;
+    }
     /* all metata received */
 
-    printf("[fido] metadata received from storage, sending USER_PRESENCE_REQ to u2fpin\n");
+    printf("[fido] metadata received from storage: dump:\n");
+    fidostorage_dump_slot(&appid_info);
+
+    printf("[fido]sending USER_PRESENCE_REQ to u2fpin\n");
     /* send userpresence request to u2fPIN and wait for METADATA request in response */
     msgbuf.mtext.u16[0] = timeout;
     /* sending appid */
@@ -185,7 +192,7 @@ bool handle_userpresence_backend(uint16_t timeout, uint8_t *appid, u2f_fido_acti
     msgrcv(get_u2fpin_msq(), &msgbuf.mtext, 64, MAGIC_STORAGE_GET_METADATA, 0);
     printf("[fido] received get_metadata from u2fpin, sending appid metadata\n");
     /* now that GET_METADATA is received from U2FPin, sending metadata to it */
-    send_appid_metadata(get_u2fpin_msq(), appid, &appid_info, *icon);
+    send_appid_metadata(get_u2fpin_msq(), appid, &appid_info, icon);
 
     printf("[fido] appid metadata sent, cleaning...\n");
     /* now wait for effective user acknowedge */
