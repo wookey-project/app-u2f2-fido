@@ -156,13 +156,11 @@ volatile bool button_pushed = false;
  * Call for both register & authenticate
  */
 
-bool handle_userpresence_backend(uint16_t timeout, uint8_t *appid, u2f_fido_action action)
+bool handle_userpresence_backend(uint16_t timeout, uint8_t *appid, u2f_fido_action action __attribute__((unused)))
 {
-    mbed_error_t errcode = MBED_ERROR_NONE;
     /* wait half of duration and return ok by now */
     button_pushed = false;
-    fidostorage_appid_slot_t    appid_info = { 0 };
-    uint8_t *icon = NULL;
+    ssize_t len;
 
     if (appid == NULL) {
         goto err;
@@ -173,7 +171,7 @@ bool handle_userpresence_backend(uint16_t timeout, uint8_t *appid, u2f_fido_acti
     /* first, get back info from storage, based on appid */
 
 
-#if 1
+#if 0
     printf("[fido] requesting metadata from storage for action %d\n", action);
     if ((errcode = request_appid_metada(get_storage_msq(), appid, &appid_info, &icon)) != MBED_ERROR_NONE) {
         printf("[fido] failure while req storage for metadata: err=%x\n", errcode);
@@ -190,20 +188,41 @@ bool handle_userpresence_backend(uint16_t timeout, uint8_t *appid, u2f_fido_acti
     msgbuf.mtext.u16[0] = timeout;
     /* sending appid */
     msgbuf.mtype = MAGIC_USER_PRESENCE_REQ,
-    msgsnd(get_u2fpin_msq(), &msgbuf, 32, 0);
+    msgsnd(get_u2fpin_msq(), &msgbuf, 2, 0);
     /* waiting for get_metadata() as a response */
     printf("[fido] now waiting for get_metadata reception from u2fpin\n");
-    msgrcv(get_u2fpin_msq(), &msgbuf, 64, MAGIC_STORAGE_GET_METADATA, 0);
-    printf("[fido] received get_metadata from u2fpin, sending appid metadata\n");
-    /* now that GET_METADATA is received from U2FPin, sending metadata to it */
-    send_appid_metadata(get_u2fpin_msq(), appid, &appid_info, icon);
-
-    printf("[fido] appid metadata sent, cleaning...\n");
-    /* now wait for effective user acknowedge */
-    if (icon != NULL) {
-        wfree((void**)icon);
+    /* receiving GET_METADATA from u2fpin.... */
+    if ((len = msgrcv(get_u2fpin_msq(), &msgbuf, 64, MAGIC_STORAGE_GET_METADATA, 0)) == -1) {
+        printf("[fido] failed to reveive from u2fpin: errno=%d\n", errno);
+        goto err;
     }
-
+    /* setting appid here :-) */
+    memcpy(&msgbuf.mtext.u8[0], appid, 32);
+    /* and transfering to storage */
+    msgsnd(get_storage_msq(), &msgbuf, len, 0);
+    /* transmit back all receiving requests from storage directly to u2fpin */
+    bool transmission_finished = false;
+    while (!transmission_finished) {
+        /* reading any msg from u2fpin */
+        if ((len = msgrcv(get_storage_msq(), &msgbuf, 64, 0, 0)) == -1) {
+            printf("[fido] failed to reveive from storage: errno=%d\n", errno);
+            goto err;
+        }
+        if (msgbuf.mtype == MAGIC_APPID_METADATA_STATUS) {
+            /* is automaton finishing on status ? */
+            if (msgbuf.mtext.u8[0] != 0xff) {
+                /* appid not found */
+                transmission_finished = true;
+            }
+        }
+        if (msgbuf.mtype == MAGIC_APPID_METADATA_END) {
+            transmission_finished = true;
+        }
+        if (msgsnd(get_u2fpin_msq(), &msgbuf, len, 0) == -1) {
+            printf("[fido] failed when transmitting to u2fpin: errno=%d\n", errno);
+        }
+    }
+    /* ... and wait for u2fpin acknowledge */
     printf("[fido] waiting for User presence ACK to FIDO\n");
     msgrcv(get_u2fpin_msq(), &msgbuf, 2, MAGIC_USER_PRESENCE_ACK, 0);
     printf("[fido] user backend returned with %x!\n", msgbuf.mtext.u16[0]);
