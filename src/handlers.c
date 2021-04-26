@@ -50,7 +50,7 @@ mbed_error_t handle_fido_request(int usb_msq)
 
 
     /* now wait for APDU_CMD_MSG_META, to calculate the number of needed msg */
-    ret = msgrcv(usb_msq, &msgbuf.mtext, msgsz, MAGIC_APDU_CMD_META, 0);
+    ret = msgrcv(usb_msq, &msgbuf, msgsz, MAGIC_APDU_CMD_META, 0);
     if (ret == -1) {
         log_printf("[FIDO] Unable to get back CMD_MSG_META with errno %x\n", errno);
         errcode = MBED_ERROR_RDERROR;
@@ -60,7 +60,7 @@ mbed_error_t handle_fido_request(int usb_msq)
     log_printf("[FIDO] received APDU_CMD_META from USB: %x\n", metadata);
 
     /* now wait for APDU_CMD_MSG_LEN, to calculate the number of needed msg */
-    ret = msgrcv(usb_msq, &msgbuf.mtext, msgsz, MAGIC_APDU_CMD_MSG_LEN, 0);
+    ret = msgrcv(usb_msq, &msgbuf, msgsz, MAGIC_APDU_CMD_MSG_LEN, 0);
     if (ret == -1) {
         log_printf("[FIDO] Unable to get back CMD_MSG_LEN with errno %x\n", errno);
         errcode = MBED_ERROR_RDERROR;
@@ -77,22 +77,24 @@ mbed_error_t handle_fido_request(int usb_msq)
     uint32_t offset = 0;
     uint32_t i;
     for (i = 0; i < num_full_msg; ++i) {
-        ret = msgrcv(usb_msq, &cmd_buf[offset], msgsz, MAGIC_APDU_CMD_MSG, 0);
+        ret = msgrcv(usb_msq, &msgbuf, msgsz, MAGIC_APDU_CMD_MSG, 0);
         if (ret == -1) {
             log_printf("[FIDO] Unable to get back CMD_MSG_LEN with errno %x\n", errno);
             errcode = MBED_ERROR_RDERROR;
             goto err;
         }
+        memcpy(&cmd_buf[offset], &msgbuf.mtext.u8[0], ret);
         log_printf("[FIDO] received APDU_CMD_MSG (pkt %d) from USB\n", i);
         offset += ret;
     }
     if (residual_msg) {
-        ret = msgrcv(usb_msq, &cmd_buf[offset], residual_msg, MAGIC_APDU_CMD_MSG, 0);
+        ret = msgrcv(usb_msq, &msgbuf, residual_msg, MAGIC_APDU_CMD_MSG, 0);
         if (ret == -1) {
             log_printf("[FIDO] Unable to get back CMD_MSG_LEN with errno %x\n", errno);
             errcode = MBED_ERROR_RDERROR;
             goto err;
         }
+        memcpy(&cmd_buf[offset], &msgbuf.mtext.u8[0], ret);
         log_printf("[FIDO] received APDU_CMD_MSG (pkt %d, residual, %d bytes) from USB\n", i, ret);
         offset += ret;
     }
@@ -171,6 +173,7 @@ bool handle_userpresence_backend(uint16_t timeout, uint8_t *appid, u2f_fido_acti
     /* first, get back info from storage, based on appid */
 
 
+#if 1
     printf("[fido] requesting metadata from storage for action %d\n", action);
     if ((errcode = request_appid_metada(get_storage_msq(), appid, &appid_info, &icon)) != MBED_ERROR_NONE) {
         printf("[fido] failure while req storage for metadata: err=%x\n", errcode);
@@ -180,6 +183,7 @@ bool handle_userpresence_backend(uint16_t timeout, uint8_t *appid, u2f_fido_acti
 
     printf("[fido] metadata received from storage: dump:\n");
     fidostorage_dump_slot(&appid_info);
+#endif
 
     printf("[fido]sending USER_PRESENCE_REQ to u2fpin\n");
     /* send userpresence request to u2fPIN and wait for METADATA request in response */
@@ -189,7 +193,7 @@ bool handle_userpresence_backend(uint16_t timeout, uint8_t *appid, u2f_fido_acti
     msgsnd(get_u2fpin_msq(), &msgbuf, 32, 0);
     /* waiting for get_metadata() as a response */
     printf("[fido] now waiting for get_metadata reception from u2fpin\n");
-    msgrcv(get_u2fpin_msq(), &msgbuf.mtext, 64, MAGIC_STORAGE_GET_METADATA, 0);
+    msgrcv(get_u2fpin_msq(), &msgbuf, 64, MAGIC_STORAGE_GET_METADATA, 0);
     printf("[fido] received get_metadata from u2fpin, sending appid metadata\n");
     /* now that GET_METADATA is received from U2FPin, sending metadata to it */
     send_appid_metadata(get_u2fpin_msq(), appid, &appid_info, icon);
@@ -201,7 +205,7 @@ bool handle_userpresence_backend(uint16_t timeout, uint8_t *appid, u2f_fido_acti
     }
 
     printf("[fido] waiting for User presence ACK to FIDO\n");
-    msgrcv(get_u2fpin_msq(), &msgbuf.mtext, 2, MAGIC_USER_PRESENCE_ACK, 0);
+    msgrcv(get_u2fpin_msq(), &msgbuf, 2, MAGIC_USER_PRESENCE_ACK, 0);
     printf("[fido] user backend returned with %x!\n", msgbuf.mtext.u16[0]);
     if (msgbuf.mtext.u16[0] == 0x4242) {
         button_pushed = true;

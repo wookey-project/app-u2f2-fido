@@ -671,7 +671,7 @@ int _main(uint32_t task_id)
 
     /* wait for requests from USB task */
     int msqr;
-    msg_mtext_union_t mbuf = { 0 };
+    struct msgbuf mbuf = { 0 };
     printf("[FIDO] parser_msq is %d\n", parser_msq);
 
     // FIX: temp: get back MAGIC_IS_BACKEND_READY, and acknowledge
