@@ -119,9 +119,9 @@ mbed_error_t handle_fido_request(int usb_msq)
     msgsnd(usb_msq, &mtype, 0, 0);
 
     msgbuf.mtype = MAGIC_APDU_RESP_MSG_LEN;
-    msgbuf.mtext.u32[0] = resp_len;
+    msgbuf.mtext.u16[0] = resp_len;
     log_printf("[FIDO] Send APDU_RESP_MSG_LEN to USB\n");
-    msgsnd(usb_msq, &msgbuf, sizeof(uint32_t), 0);
+    msgsnd(usb_msq, &msgbuf, sizeof(uint16_t), 0);
 
     num_full_msg = resp_len / 64;
     residual_msg = resp_len % 64;
@@ -156,7 +156,7 @@ volatile bool button_pushed = false;
  * Call for both register & authenticate
  */
 
-bool handle_userpresence_backend(uint16_t timeout, uint8_t *appid, u2f_fido_action action __attribute__((unused)))
+bool handle_userpresence_backend(uint16_t timeout, uint8_t *appid, u2f_fido_action action)
 {
     /* wait half of duration and return ok by now */
     button_pushed = false;
@@ -186,9 +186,10 @@ bool handle_userpresence_backend(uint16_t timeout, uint8_t *appid, u2f_fido_acti
     printf("[fido]sending USER_PRESENCE_REQ to u2fpin\n");
     /* send userpresence request to u2fPIN and wait for METADATA request in response */
     msgbuf.mtext.u16[0] = timeout;
+    msgbuf.mtext.u16[1] = action;
     /* sending appid */
     msgbuf.mtype = MAGIC_USER_PRESENCE_REQ,
-    msgsnd(get_u2fpin_msq(), &msgbuf, 2, 0);
+    msgsnd(get_u2fpin_msq(), &msgbuf, 2*sizeof(uint16_t), 0);
     /* waiting for get_metadata() as a response */
     printf("[fido] now waiting for get_metadata reception from u2fpin\n");
     /* receiving GET_METADATA from u2fpin.... */
@@ -207,13 +208,6 @@ bool handle_userpresence_backend(uint16_t timeout, uint8_t *appid, u2f_fido_acti
         if ((len = msgrcv(get_storage_msq(), &msgbuf, 64, 0, 0)) == -1) {
             printf("[fido] failed to reveive from storage: errno=%d\n", errno);
             goto err;
-        }
-        if (msgbuf.mtype == MAGIC_APPID_METADATA_STATUS) {
-            /* is automaton finishing on status ? */
-            if (msgbuf.mtext.u8[0] != 0xff) {
-                /* appid not found */
-                transmission_finished = true;
-            }
         }
         if (msgbuf.mtype == MAGIC_APPID_METADATA_END) {
             transmission_finished = true;
