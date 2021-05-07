@@ -52,7 +52,7 @@ mbed_error_t handle_fido_request(int usb_msq)
     /* now wait for APDU_CMD_MSG_META, to calculate the number of needed msg */
     ret = msgrcv(usb_msq, &msgbuf, msgsz, MAGIC_APDU_CMD_META, 0);
     if (ret == -1) {
-        log_printf("[FIDO] Unable to get back CMD_MSG_META with errno %x\n", errno);
+        printf("[FIDO] Unable to get back CMD_MSG_META with errno %x\n", errno);
         errcode = MBED_ERROR_RDERROR;
         goto err;
     }
@@ -62,12 +62,12 @@ mbed_error_t handle_fido_request(int usb_msq)
     /* now wait for APDU_CMD_MSG_LEN, to calculate the number of needed msg */
     ret = msgrcv(usb_msq, &msgbuf, msgsz, MAGIC_APDU_CMD_MSG_LEN, 0);
     if (ret == -1) {
-        log_printf("[FIDO] Unable to get back CMD_MSG_LEN with errno %x\n", errno);
+        printf("[FIDO] Unable to get back CMD_MSG_LEN with errno %x\n", errno);
         errcode = MBED_ERROR_RDERROR;
         goto err;
     }
     msg_size = msgbuf.mtext.u16[0];
-    log_printf("[FIDO] received APDU_CMD_MSG_LEN from USB (len is %d)\n", msg_size);
+    printf("[FIDO] received APDU_CMD_MSG_LEN from USB (len is %d)\n", msg_size);
 
     /* calculating number of messages */
     uint32_t num_full_msg = msg_size / 64;
@@ -79,7 +79,7 @@ mbed_error_t handle_fido_request(int usb_msq)
     for (i = 0; i < num_full_msg; ++i) {
         ret = msgrcv(usb_msq, &msgbuf, msgsz, MAGIC_APDU_CMD_MSG, 0);
         if (ret == -1) {
-            log_printf("[FIDO] Unable to get back CMD_MSG_LEN with errno %x\n", errno);
+            printf("[FIDO] Unable to get back CMD_MSG_LEN with errno %x\n", errno);
             errcode = MBED_ERROR_RDERROR;
             goto err;
         }
@@ -90,7 +90,7 @@ mbed_error_t handle_fido_request(int usb_msq)
     if (residual_msg) {
         ret = msgrcv(usb_msq, &msgbuf, residual_msg, MAGIC_APDU_CMD_MSG, 0);
         if (ret == -1) {
-            log_printf("[FIDO] Unable to get back CMD_MSG_LEN with errno %x\n", errno);
+            printf("[FIDO] Unable to get back CMD_MSG_LEN with errno %x\n", errno);
             errcode = MBED_ERROR_RDERROR;
             goto err;
         }
@@ -167,23 +167,23 @@ bool handle_userpresence_backend(uint16_t timeout, uint8_t *appid, u2f_fido_acti
     }
     struct msgbuf msgbuf = { 0 };
 
-    printf("[fido] user presence, timeout is %d ms\n", timeout);
+    log_printf("[fido] user presence, timeout is %d ms\n", timeout);
     /* first, get back info from storage, based on appid */
 
 
 #if 0
-    printf("[fido] requesting metadata from storage for action %d\n", action);
+    log_printf("[fido] requesting metadata from storage for action %d\n", action);
     if ((errcode = request_appid_metada(get_storage_msq(), appid, &appid_info, &icon)) != MBED_ERROR_NONE) {
         printf("[fido] failure while req storage for metadata: err=%x\n", errcode);
         goto err;
     }
     /* all metata received */
 
-    printf("[fido] metadata received from storage: dump:\n");
+    log_printf("[fido] metadata received from storage: dump:\n");
     fidostorage_dump_slot(&appid_info);
 #endif
 
-    printf("[fido]sending USER_PRESENCE_REQ to u2fpin\n");
+    log_printf("[fido]sending USER_PRESENCE_REQ to u2fpin\n");
     /* send userpresence request to u2fPIN and wait for METADATA request in response */
     msgbuf.mtext.u16[0] = timeout;
     msgbuf.mtext.u16[1] = action;
@@ -191,7 +191,7 @@ bool handle_userpresence_backend(uint16_t timeout, uint8_t *appid, u2f_fido_acti
     msgbuf.mtype = MAGIC_USER_PRESENCE_REQ,
     msgsnd(get_u2fpin_msq(), &msgbuf, 2*sizeof(uint16_t), 0);
     /* waiting for get_metadata() as a response */
-    printf("[fido] now waiting for get_metadata reception from u2fpin\n");
+    log_printf("[fido] now waiting for get_metadata reception from u2fpin\n");
     /* receiving GET_METADATA from u2fpin.... */
     if ((len = msgrcv(get_u2fpin_msq(), &msgbuf, 64, MAGIC_STORAGE_GET_METADATA, 0)) == -1) {
         printf("[fido] failed to reveive from u2fpin: errno=%d\n", errno);
@@ -217,9 +217,9 @@ bool handle_userpresence_backend(uint16_t timeout, uint8_t *appid, u2f_fido_acti
         }
     }
     /* ... and wait for u2fpin acknowledge */
-    printf("[fido] waiting for User presence ACK to FIDO\n");
+    log_printf("[fido] waiting for User presence ACK to FIDO\n");
     msgrcv(get_u2fpin_msq(), &msgbuf, 2, MAGIC_USER_PRESENCE_ACK, 0);
-    printf("[fido] user backend returned with %x!\n", msgbuf.mtext.u16[0]);
+    log_printf("[fido] user backend returned with %x!\n", msgbuf.mtext.u16[0]);
     if (msgbuf.mtext.u16[0] == 0x4242) {
         button_pushed = true;
     }

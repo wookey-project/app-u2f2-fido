@@ -515,7 +515,7 @@ again:
 #ifndef UNSAFE_LOCAL_KEY_HANDLE_GENERATION
     /* Open FIDO session with token */
     if(fido_open_session()){
-        log_printf("[FIDO] cannot open FIDO session with the token\n");
+        printf("[FIDO] cannot open FIDO session with the token\n");
         goto err;
     }
 #endif
