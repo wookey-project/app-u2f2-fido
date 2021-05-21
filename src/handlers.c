@@ -16,6 +16,10 @@
 
 #include "generated/bsram_keybag.h"
 
+
+static uint32_t ctr;
+static bool     ctr_valid = false;
+
 mbed_error_t handle_wink(uint16_t timeout_ms, int usb_msq)
 {
     /* FIXME: get back EMULATION config and handle it here */
@@ -111,6 +115,12 @@ mbed_error_t handle_fido_request(int usb_msq)
     cmd_buf[msg_size] = 0x0;
 
     errcode = u2f_fido_handle_cmd(metadata, &cmd_buf[0], msg_size, &resp_buf[0], &resp_len);
+
+    /* here, if the command was an authenticate and the CTR set, cleaning it */
+    if (ctr_valid == true) {
+        ctr = 0;
+        ctr_valid = false;
+    }
 
     /* return back content */
 
@@ -208,6 +218,16 @@ bool handle_userpresence_backend(uint16_t timeout, uint8_t *appid, u2f_fido_acti
         if ((len = msgrcv(get_storage_msq(), &msgbuf, 64, 0, 0)) == -1) {
             printf("[fido] failed to reveive from storage: errno=%d\n", errno);
             goto err;
+        }
+        if (msgbuf.mtype == MAGIC_APPID_METADATA_CTR) {
+            /* here we steel the CTR to avoid to get it back again from storage,
+             * thanks to our proxy position */
+            if (ctr_valid == true) {
+                printf("a current CTR is already set!!! should not happen!\n");
+                /* XXX: define behavior */
+            }
+            ctr = msgbuf.mtext.u32[0];
+            ctr_valid = true;
         }
         if (msgbuf.mtype == MAGIC_APPID_METADATA_END) {
             transmission_finished = true;
