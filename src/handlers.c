@@ -20,6 +20,32 @@
 static uint32_t ctr;
 static bool     ctr_valid = false;
 
+uint32_t fido_get_auth_counter(void) {
+    if (ctr_valid == true) {
+        return ctr;
+    }
+    return 0;
+}
+
+void fido_inc_auth_counter(const uint8_t *appid, uint16_t appid_len) {
+
+    struct msgbuf msgbuf = { 0 };
+    msgbuf.mtype = MAGIC_STORAGE_INC_CTR;
+    if (appid_len > 64) {
+        printf("[fido] appid len too big!\n");
+        goto err;
+    }
+    memcpy(&msgbuf.mtext.u8[0], appid, appid_len);
+    if (msgsnd(get_storage_msq(), &msgbuf, appid_len, 0) < 0) {
+        printf("[fido] failed to send CTR inc to storage!\n");
+    }
+
+err:
+    return;
+}
+
+
+
 mbed_error_t handle_wink(uint16_t timeout_ms, int usb_msq)
 {
     /* FIXME: get back EMULATION config and handle it here */
