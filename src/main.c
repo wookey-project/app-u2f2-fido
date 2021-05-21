@@ -585,6 +585,59 @@ void wink_down(void)
 }
 
 
+mbed_error_t handle_storage_assets(void)
+{
+    mbed_error_t errcode = MBED_ERROR_UNKNOWN;
+    uint8_t retries_wrap = 0;
+    int msqr;
+    struct msgbuf msgbuf = { 0 };
+    printf("starting storage assets sync with storage app\n");
+
+    while (wrap_auth_token_exchanges(fido_get_token_channel(), NULL, true)){
+        printf("[APP FIDO] token reinit failed ...\n");
+        if(retries_wrap > MAX_RETRIES){
+            errcode = MBED_ERROR_NOBACKEND;
+            goto err;
+        }
+        retries_wrap++;
+    }
+
+    /* waiting for get_assets request from storage */
+    if ((msqr = msgrcv(storage_msq, &msgbuf, 0, MAGIC_STORAGE_GET_ASSETS, 0)) < 0) {
+        printf("[storage] failed while waiting for get_assets request from storage, errno=%d\n", errno);
+        errcode = MBED_ERROR_INTR;
+        goto err;
+    }
+
+    /* and returning successively.... */
+    /* 1. AES master key from which encryption & integrity keys are generated */
+    msgbuf.mtype = MAGIC_STORAGE_SET_ASSETS_MASTERKEY;
+    // fix add AES enc key
+    memcpy(&msgbuf.mtext.u8[0], &MASTER_secret[0], 32);
+    msqr = msgsnd(storage_msq, &msgbuf, 32, 0);
+    if (msqr < 0) {
+        printf("[storage] failed to send back AES enc key to storage, errno=%d\n", errno);
+        errcode = MBED_ERROR_INTR;
+        goto err;
+    }
+
+    /* 2. Anti-rollback counter */
+    msgbuf.mtype = MAGIC_STORAGE_SET_ASSETS_ROLLBK;
+    // fix add anti-rollback counter
+    msqr = msgsnd(storage_msq, &msgbuf, 8, 0);
+    if (msqr < 0) {
+        printf("[storage] failed to send back AES enc key to storage, errno=%d\n", errno);
+        errcode = MBED_ERROR_INTR;
+        goto err;
+    }
+
+    errcode = MBED_ERROR_NONE;
+err:
+    return errcode;
+
+}
+
+
 /*
  * Entrypoint
  */
@@ -682,6 +735,13 @@ int _main(uint32_t task_id)
     // END FIX
 
     while(token_initialized == false){};
+    /* handle for storage assets request from storage */
+    if (handle_storage_assets() != MBED_ERROR_NONE) {
+        printf("[FIDO] failed to inform properly storage with cryptographic assets, leaving\n");
+        goto err;
+    }
+
+
 
     size_t msgsz = 64;
     do {
