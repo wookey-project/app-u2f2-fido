@@ -557,6 +557,9 @@ mbed_error_t unlock_u2f2(void)
     }
     /* ... and acknowledge frontend
      */
+    struct msgbuf msgbuf = { 0 };
+    msgbuf.mtype = MAGIC_TOKEN_UNLOCKED;
+    msgsnd(u2fpin_msq, &msgbuf, 0, 0);
 
 err:
     return errcode;
