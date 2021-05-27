@@ -1,7 +1,7 @@
 #ifndef MAIN_H_
 #define MAIN_H_
 
-#define FIDO_DEBUG 0
+#define FIDO_DEBUG 1
 
 #if FIDO_DEBUG
 # define log_printf(...) printf(__VA_ARGS__)
@@ -11,6 +11,8 @@
 
 
 int get_u2fpin_msq(void);
+
+int get_storage_msq(void);
 
 /* exported utilities */
 void wink_up(void);

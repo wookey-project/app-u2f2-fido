@@ -25,6 +25,7 @@
 
 //#define UNSAFE_LOCAL_KEY_HANDLE_GENERATION
 #include "AUTH/FIDO/attestation_key.der.h"
+#include "AUTH/FIDO/fido_hmac.bin.h"
 
 static token_channel curr_token_channel = { .channel_initialized = 0, .secure_channel = 0, .IV = { 0 }, .first_IV = { 0 }, .AES_key = { 0 }, .HMAC_key = { 0 }, .pbkdf2_iterations = 0, .platform_salt_len = 0 };
 
@@ -61,23 +62,20 @@ int fido_open_session(void)
 
 	/* The FIDO derivation secret on our end is the hash of our decrypted platform keys */
         sha256_init(&sha256_ctx);
-        sha256_update(&sha256_ctx, (const uint8_t*)decrypted_token_pub_key_data, sizeof(decrypted_token_pub_key_data));
-        sha256_update(&sha256_ctx, (const uint8_t*)decrypted_platform_priv_key_data, sizeof(decrypted_platform_priv_key_data));
-        sha256_update(&sha256_ctx, (const uint8_t*)decrypted_platform_pub_key_data, sizeof(decrypted_platform_pub_key_data));
+        sha256_update(&sha256_ctx, (const uint8_t*)saved_decrypted_keybag[0].data, saved_decrypted_keybag[0].size);
+        sha256_update(&sha256_ctx, (const uint8_t*)saved_decrypted_keybag[1].data, saved_decrypted_keybag[1].size);
+        sha256_update(&sha256_ctx, (const uint8_t*)saved_decrypted_keybag[2].data, saved_decrypted_keybag[2].size);
         sha256_final(&sha256_ctx, pkey);
-
 	if(fido_get_token_channel()->channel_initialized != 1){
 		goto err;
 	}
-	if(auth_token_fido_send_pkey(fido_get_token_channel(), pkey, sizeof(pkey), fido_attestation_privkey + (FIDO_PRIV_KEY_SIZE / 2), &hpriv_key_len)){
+	if(auth_token_fido_send_pkey(fido_get_token_channel(), pkey, sizeof(pkey), fido_hmac, sizeof(fido_hmac), fido_attestation_privkey + (FIDO_PRIV_KEY_SIZE / 2), &hpriv_key_len)){
 		goto err;
 	}
 	/* Copy other half private key */
 	memcpy(fido_attestation_privkey, fido_attestation_halfprivkey, FIDO_PRIV_KEY_SIZE / 2);
-//printf("===> !!! FIDO SESSION OPENED OK!\n");
 	return 0;
 err:
-//printf("===> !!! FIDO SESSION NOT OPENED\n");
 	return -1;
 }
 
@@ -96,7 +94,6 @@ int callback_fido_register(const uint8_t *app_data, uint16_t app_data_len, uint8
 	unsigned int _key_handle_len = *key_handle_len;
 	unsigned int _ecdsa_priv_key_len = *ecdsa_priv_key_len;
 	while(auth_token_fido_register(fido_get_token_channel(), app_data, app_data_len, key_handle, &_key_handle_len, ecdsa_priv_key, &_ecdsa_priv_key_len)){
-//printf("===> auth_token_fido_register failed ...\n");
 		if(retries_reg > MAX_RETRIES){
 			goto err;
 		}
@@ -156,7 +153,6 @@ int callback_fido_authenticate(const uint8_t *app_data, uint16_t app_data_len, c
 	}
 	if(check_only != 0){
 		while(auth_token_fido_authenticate(fido_get_token_channel(), app_data, app_data_len, key_handle, key_handle_len, NULL, NULL, check_only, &check_result)){
-printf("===> auth_token_fido_authenticate failed1 ...\n");
  		        if(retries_auth > MAX_RETRIES){
 			    goto err;
   		        }
@@ -186,7 +182,6 @@ printf("===> auth_token_fido_authenticate failed1 ...\n");
 	else{
 		_ecdsa_priv_key_len = *ecdsa_priv_key_len;
 		while(auth_token_fido_authenticate(fido_get_token_channel(), app_data, app_data_len, key_handle, key_handle_len, ecdsa_priv_key, &_ecdsa_priv_key_len, check_only, &check_result)){
-printf("===> auth_token_fido_authenticate failed2 ...\n");
  		        if(retries_auth > MAX_RETRIES){
 			    goto err;
   		        }
@@ -300,6 +295,12 @@ int u2fpin_msq = 0;
 int get_u2fpin_msq(void) {
     return u2fpin_msq;
 }
+int storage_msq = 0;
+int get_storage_msq(void) {
+    return storage_msq;
+}
+
+
 
 /* Cached credentials */
 char global_user_pin[32] = { 0 };
@@ -315,9 +316,7 @@ int auth_token_request_pin(char *pin, unsigned int *pin_len, token_pin_types pin
     msg_mtext_union_t data = { 0 };
     size_t data_len = sizeof(msg_mtext_union_t);
 
-//printf("===> auth_token_request_pin\n");
     if(use_saved_pins == true){
-//printf("EMULATE!!\n");
         if(pin_type == TOKEN_PET_PIN){
             if(global_pet_pin_len > *pin_len){
                 goto err;
@@ -394,14 +393,12 @@ err:
 
 int auth_token_acknowledge_pin(__attribute__((unused)) token_ack_state ack, __attribute__((unused)) token_pin_types pin_type, __attribute__((unused)) token_pin_actions action, __attribute__((unused)) uint32_t remaining_tries)
 {
-//printf("===> auth_token_acknowledge_pin\n");
     /* FIXME: TODO: */
     return 0;
 }
 
 int auth_token_request_pet_name(__attribute__((unused)) char *pet_name,  __attribute__((unused))unsigned int *pet_name_len)
 {
-//printf("===> auth_token_request_pet_name\n");
     /* FIXME: TODO: */
     return 0;
 }
@@ -410,12 +407,10 @@ int auth_token_request_pet_name_confirmation(const char *pet_name, unsigned int 
 {
     msg_mtext_union_t data = { 0 };
     size_t data_len = 0;
-//printf("====> auth_token_request_pet_name_confirmation\n");
     if(pet_name == NULL){
         goto err;
     }
     if(use_saved_pins == true){
-//printf("EMULATE!!\n");
         return 0;
     }
     strncpy(&data.c[0], pet_name, pet_name_len);
@@ -520,7 +515,7 @@ again:
 #ifndef UNSAFE_LOCAL_KEY_HANDLE_GENERATION
     /* Open FIDO session with token */
     if(fido_open_session()){
-        log_printf("[FIDO] cannot open FIDO session with the token\n");
+        printf("[FIDO] cannot open FIDO session with the token\n");
         goto err;
     }
 #endif
@@ -593,37 +588,56 @@ void wink_down(void)
 }
 
 
-/*********************************************************
- * Hardware-related declarations (backend handling)
- */
-
-static mbed_error_t declare_userpresence_backend(void)
+mbed_error_t handle_storage_assets(void)
 {
-    // PTH FIX: this should be associated to u2fPIN informational screen
-#if 0
-    uint8_t ret;
-    /* Button + LEDs */
-    memset (&up, 0, sizeof (up));
+    mbed_error_t errcode = MBED_ERROR_UNKNOWN;
+    uint8_t retries_wrap = 0;
+    int msqr;
+    struct msgbuf msgbuf = { 0 };
+    printf("starting storage assets sync with storage app\n");
 
-    strncpy (up.name, "UsPre", sizeof (up.name));
-    up.gpio_num = 1; /* Number of configured GPIO */
-
-    up.gpios[0].kref.port = led1_dev_infos.gpios[LED0_BASE].port;
-    up.gpios[0].kref.pin = led1_dev_infos.gpios[LED0_BASE].pin;
-    up.gpios[0].mask     = GPIO_MASK_SET_MODE | GPIO_MASK_SET_PUPD |
-                                 GPIO_MASK_SET_TYPE | GPIO_MASK_SET_SPEED;
-    up.gpios[0].mode     = GPIO_PIN_OUTPUT_MODE;
-    up.gpios[0].pupd     = GPIO_PULLDOWN;
-    up.gpios[0].type     = GPIO_PIN_OTYPER_PP;
-    up.gpios[0].speed    = GPIO_PIN_HIGH_SPEED;
-
-
-    ret = sys_init(INIT_DEVACCESS, &up, &desc_up);
-    if (ret == SYS_E_DONE) {
-        return MBED_ERROR_NONE;
+    while (wrap_auth_token_exchanges(fido_get_token_channel(), NULL, true)){
+        printf("[APP FIDO] token reinit failed ...\n");
+        if(retries_wrap > MAX_RETRIES){
+            errcode = MBED_ERROR_NOBACKEND;
+            goto err;
+        }
+        retries_wrap++;
     }
-#endif
-    return MBED_ERROR_UNKNOWN;
+
+    /* waiting for get_assets request from storage */
+    if ((msqr = msgrcv(storage_msq, &msgbuf, 0, MAGIC_STORAGE_GET_ASSETS, 0)) < 0) {
+        printf("[storage] failed while waiting for get_assets request from storage, errno=%d\n", errno);
+        errcode = MBED_ERROR_INTR;
+        goto err;
+    }
+
+    /* and returning successively.... */
+    /* 1. AES master key from which encryption & integrity keys are generated */
+    msgbuf.mtype = MAGIC_STORAGE_SET_ASSETS_MASTERKEY;
+    // fix add AES enc key
+    memcpy(&msgbuf.mtext.u8[0], &MASTER_secret[0], 32);
+    msqr = msgsnd(storage_msq, &msgbuf, 32, 0);
+    if (msqr < 0) {
+        printf("[storage] failed to send back AES enc key to storage, errno=%d\n", errno);
+        errcode = MBED_ERROR_INTR;
+        goto err;
+    }
+
+    /* 2. Anti-rollback counter */
+    msgbuf.mtype = MAGIC_STORAGE_SET_ASSETS_ROLLBK;
+    // fix add anti-rollback counter
+    msqr = msgsnd(storage_msq, &msgbuf, 8, 0);
+    if (msqr < 0) {
+        printf("[storage] failed to send back AES enc key to storage, errno=%d\n", errno);
+        errcode = MBED_ERROR_INTR;
+        goto err;
+    }
+
+    errcode = MBED_ERROR_NONE;
+err:
+    return errcode;
+
 }
 
 
@@ -646,7 +660,6 @@ int _main(uint32_t task_id)
     printf("%s\n", wellcome_msg);
     wmalloc_init();
 
-    declare_userpresence_backend();
     int parser_msq = 0;
 
     /* Posix SystemV message queue init */
@@ -657,6 +670,11 @@ int _main(uint32_t task_id)
         goto err;
     }
     u2fpin_msq = msgget("u2fpin", IPC_CREAT | IPC_EXCL);
+    if (u2fpin_msq == -1) {
+        printf("error while requesting SysV message queue. Errno=%x\n", errno);
+        goto err;
+    }
+    storage_msq = msgget("storage", IPC_CREAT | IPC_EXCL);
     if (u2fpin_msq == -1) {
         printf("error while requesting SysV message queue. Errno=%x\n", errno);
         goto err;
@@ -709,7 +727,7 @@ int _main(uint32_t task_id)
 
     /* wait for requests from USB task */
     int msqr;
-    msg_mtext_union_t mbuf = { 0 };
+    struct msgbuf mbuf = { 0 };
     printf("[FIDO] parser_msq is %d\n", parser_msq);
 
     // FIX: temp: get back MAGIC_IS_BACKEND_READY, and acknowledge
@@ -720,6 +738,13 @@ int _main(uint32_t task_id)
     // END FIX
 
     while(token_initialized == false){};
+    /* handle for storage assets request from storage */
+    if (handle_storage_assets() != MBED_ERROR_NONE) {
+        printf("[FIDO] failed to inform properly storage with cryptographic assets, leaving\n");
+        goto err;
+    }
+
+
 
     size_t msgsz = 64;
     do {
