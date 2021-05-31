@@ -596,7 +596,7 @@ mbed_error_t handle_storage_assets(void)
 
     /* waiting for get_assets request from storage */
     if ((msqr = msgrcv(storage_msq, &msgbuf, 0, MAGIC_STORAGE_GET_ASSETS, 0)) < 0) {
-        printf("[storage] failed while waiting for get_assets request from storage, errno=%d\n", errno);
+        printf("[fido storage] failed while waiting for get_assets request from storage, errno=%d\n", errno);
         errcode = MBED_ERROR_INTR;
         goto err;
     }
@@ -608,7 +608,7 @@ mbed_error_t handle_storage_assets(void)
     memcpy(&msgbuf.mtext.u8[0], &MASTER_secret[0], 32);
     msqr = msgsnd(storage_msq, &msgbuf, 32, 0);
     if (msqr < 0) {
-        printf("[storage] failed to send back AES enc key to storage, errno=%d\n", errno);
+        printf("[fido storage] failed to send back AES enc key to storage, errno=%d\n", errno);
         errcode = MBED_ERROR_INTR;
         goto err;
     }
@@ -618,17 +618,34 @@ mbed_error_t handle_storage_assets(void)
     // Get back the rollback counter from the smartcard
     unsigned int counter_len = 8;
     if(auth_token_fido_get_replay_counter(fido_get_token_channel(), &msgbuf.mtext.u8[0], &counter_len)){
-        printf("[storage] failed to get the global rollback counter from smartcard\n");
+        printf("[fido storage] failed to get the global rollback counter from smartcard\n");
         errcode = MBED_ERROR_INTR;
         goto err;
     }
     msqr = msgsnd(storage_msq, &msgbuf, 8, 0);
     if (msqr < 0) {
-        printf("[storage] failed to send back AES enc key to storage, errno=%d\n", errno);
+        printf("[fido storage] failed to send back AES enc key to storage, errno=%d\n", errno);
         errcode = MBED_ERROR_INTR;
         goto err;
     }
-
+    // Now wait for acknowledge and new counter
+    size_t msgsz = 8;
+    if ((msqr = msgrcv(storage_msq, &msgbuf, msgsz, MAGIC_STORAGE_SD_ROLLBK_COUNTER, 0)) < 0) {
+        printf("[fido storage] failed while trying to receive anti-rollback counter, errno=%d\n", errno);
+        errcode = MBED_ERROR_INTR;
+        goto err;
+    }
+    if (msqr < 8) {
+        printf("[fido storage] received rollback counter too small: %d bytes\n", msqr);
+        errcode = MBED_ERROR_INTR;
+        goto err;
+    }
+    /* Now set the new counter */
+    if(auth_token_fido_set_replay_counter(fido_get_token_channel(), &msgbuf.mtext.u8[0], 8)){
+        printf("[fido storage] failed to set the global rollback counter in smartcard\n");
+        errcode = MBED_ERROR_INTR;
+        goto err;
+    }
     errcode = MBED_ERROR_NONE;
 err:
     return errcode;
