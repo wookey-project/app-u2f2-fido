@@ -539,7 +539,6 @@ int parser_msq = 0;
 mbed_error_t unlock_u2f2(void)
 {
     mbed_error_t errcode = MBED_ERROR_NONE;
-
     /* unlocking u2f2 is made of multiple steps:
      * 1/ ask u2fpin for 'backend_ready'
      */
@@ -591,19 +590,9 @@ void wink_down(void)
 mbed_error_t handle_storage_assets(void)
 {
     mbed_error_t errcode = MBED_ERROR_UNKNOWN;
-    uint8_t retries_wrap = 0;
     int msqr;
     struct msgbuf msgbuf = { 0 };
     printf("starting storage assets sync with storage app\n");
-
-    while (wrap_auth_token_exchanges(fido_get_token_channel(), NULL, true)){
-        printf("[APP FIDO] token reinit failed ...\n");
-        if(retries_wrap > MAX_RETRIES){
-            errcode = MBED_ERROR_NOBACKEND;
-            goto err;
-        }
-        retries_wrap++;
-    }
 
     /* waiting for get_assets request from storage */
     if ((msqr = msgrcv(storage_msq, &msgbuf, 0, MAGIC_STORAGE_GET_ASSETS, 0)) < 0) {
@@ -626,7 +615,13 @@ mbed_error_t handle_storage_assets(void)
 
     /* 2. Anti-rollback counter */
     msgbuf.mtype = MAGIC_STORAGE_SET_ASSETS_ROLLBK;
-    // fix add anti-rollback counter
+    // Get back the rollback counter from the smartcard
+    unsigned int counter_len = 8;
+    if(auth_token_fido_get_replay_counter(fido_get_token_channel(), &msgbuf.mtext.u8[0], &counter_len)){
+        printf("[storage] failed to get the global rollback counter from smartcard\n");
+        errcode = MBED_ERROR_INTR;
+        goto err;
+    }
     msqr = msgsnd(storage_msq, &msgbuf, 8, 0);
     if (msqr < 0) {
         printf("[storage] failed to send back AES enc key to storage, errno=%d\n", errno);
