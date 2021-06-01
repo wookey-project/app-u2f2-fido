@@ -259,6 +259,9 @@ bool handle_fido_event_backend(uint16_t timeout, const uint8_t appid[FIDO_APPLIC
     fido_ctx.fido_action = action;
     request_data_membarrier();
 
+    if (action == U2F_FIDO_CHECK_ONLY) {
+        msgbuf.mtype = MAGIC_STORAGE_GET_METADATA_STATUS;
+    }
     /* Ask GUI backend except when dealing with CHECK ONLY */
     if((action == U2F_FIDO_REGISTER) || (action == U2F_FIDO_AUTHENTICATE)){
         log_printf("[fido]sending USER_PRESENCE_REQ to u2fpin\n");
@@ -266,7 +269,7 @@ bool handle_fido_event_backend(uint16_t timeout, const uint8_t appid[FIDO_APPLIC
         msgbuf.mtext.u16[0] = timeout;
         msgbuf.mtext.u16[1] = action;
         /* sending appid */
-        msgbuf.mtype = MAGIC_USER_PRESENCE_REQ,
+        msgbuf.mtype = MAGIC_USER_PRESENCE_REQ;
         msgsnd(get_u2fpin_msq(), &msgbuf, 2*sizeof(uint16_t), 0);
         /* waiting for get_metadata() as a response */
         log_printf("[fido] now waiting for get_metadata reception from u2fpin\n");
@@ -276,6 +279,8 @@ bool handle_fido_event_backend(uint16_t timeout, const uint8_t appid[FIDO_APPLIC
             goto err;
         }
     }
+
+
     /* setting appid and hash(KH) here :-) */
     memcpy(&msgbuf.mtext.u8[0], appid, 32);
     switch (action) {
@@ -301,40 +306,75 @@ bool handle_fido_event_backend(uint16_t timeout, const uint8_t appid[FIDO_APPLIC
             /* This action should not happen! */
             break;
     }
-    /* and transfering to storage */
+    /* here, we have, in CHECK_ONLY case, a msgbuf typed GET_METADATA_STATUS and containing
+     * the appid and the KH hash.
+     * In REGISTER or AUTHENTICATE case, the msgbuf is typed GET_METADATA and contains the same
+     * fields
+     * From now on, in check only, we can work alone, in register and authenticase case, we
+     * handle the communication between u2fpin and storage as a proxy */
+
+    /* transfering the request to storage */
     len = 64;
     msgsnd(get_storage_msq(), &msgbuf, len, 0);
-    /* transmit back all receiving requests from storage directly to u2fpin */
-    bool transmission_finished = false;
-    while (!transmission_finished) {
-        /* reading any msg from storage */
-        if ((len = msgrcv(get_storage_msq(), &msgbuf, 64, 0, 0)) == -1) {
+
+
+    /* in CHECK only, we react to the slot status only */
+    if (action == U2F_FIDO_CHECK_ONLY) {
+        if ((len = msgrcv(get_storage_msq(), &msgbuf, 1, MAGIC_APPID_METADATA_STATUS, 0)) == -1) {
             printf("[fido] failed to reveive from storage: errno=%d\n", errno);
             goto err;
         }
-        if(action == U2F_FIDO_CHECK_ONLY){
-            /* In CHECK ONLY mode, this is it, storage is OK and we can sefely continue! */
-            return true;
+        if (len != 1)  {
+            /* XXX: invalid response len */
         }
-        if (msgbuf.mtype == MAGIC_APPID_METADATA_CTR) {
-            /* here we steal the CTR to avoid to get it back again from storage,
-             * thanks to our proxy position */
-            set_u32_with_membarrier(&fido_ctx.ctr, msgbuf.mtext.u32[0]);
-            set_bool_with_membarrier(&fido_ctx.valid, true);
+        button_pushed = false;
+        switch (msgbuf.mtext.u8[0]) {
+            case 0x0:
+                /* kept false */
+                break;
+            case 0xff:
+                button_pushed = true;
+                break;
+            default:
+                /* kept false */
+                break;
         }
-        if (msgbuf.mtype == MAGIC_APPID_METADATA_END) {
-            transmission_finished = true;
-        }
-        if (msgsnd(get_u2fpin_msq(), &msgbuf, len, 0) == -1) {
-            printf("[fido] failed when transmitting to u2fpin: errno=%d\n", errno);
-        }
+        goto err;
     }
-    /* ... and wait for u2fpin acknowledge */
-    log_printf("[fido] waiting for User presence ACK to FIDO\n");
-    msgrcv(get_u2fpin_msq(), &msgbuf, 2, MAGIC_USER_PRESENCE_ACK, 0);
-    log_printf("[fido] user backend returned with %x!\n", msgbuf.mtext.u16[0]);
-    if (msgbuf.mtext.u16[0] == 0x4242) {
-        button_pushed = true;
+    /* in register or authenticate, we handle the communication as a proxy */
+    if((action == U2F_FIDO_REGISTER) || (action == U2F_FIDO_AUTHENTICATE)){
+        /* transmit back all receiving requests from storage directly to u2fpin */
+        bool transmission_finished = false;
+        while (!transmission_finished) {
+            /* reading any msg from storage */
+            if ((len = msgrcv(get_storage_msq(), &msgbuf, 64, 0, 0)) == -1) {
+                printf("[fido] failed to reveive from storage: errno=%d\n", errno);
+                goto err;
+            }
+            if(action == U2F_FIDO_CHECK_ONLY){
+                /* In CHECK ONLY mode, this is it, storage is OK and we can sefely continue! */
+                return true;
+            }
+            if (msgbuf.mtype == MAGIC_APPID_METADATA_CTR) {
+                /* here we steal the CTR to avoid to get it back again from storage,
+                 * thanks to our proxy position */
+                set_u32_with_membarrier(&fido_ctx.ctr, msgbuf.mtext.u32[0]);
+                set_bool_with_membarrier(&fido_ctx.valid, true);
+            }
+            if (msgbuf.mtype == MAGIC_APPID_METADATA_END) {
+                transmission_finished = true;
+            }
+            if (msgsnd(get_u2fpin_msq(), &msgbuf, len, 0) == -1) {
+                printf("[fido] failed when transmitting to u2fpin: errno=%d\n", errno);
+            }
+        }
+        /* ... and wait for u2fpin acknowledge */
+        log_printf("[fido] waiting for User presence ACK to FIDO\n");
+        msgrcv(get_u2fpin_msq(), &msgbuf, 2, MAGIC_USER_PRESENCE_ACK, 0);
+        log_printf("[fido] user backend returned with %x!\n", msgbuf.mtext.u16[0]);
+        if (msgbuf.mtext.u16[0] == 0x4242) {
+            button_pushed = true;
+        }
     }
 err:
     return button_pushed;
