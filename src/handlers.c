@@ -20,6 +20,15 @@
 static volatile uint32_t ctr;
 static volatile bool     ctr_valid = false;
 
+/*@
+  @ requires \valid(hash + (0 .. 31));
+  @ requires \valid_read(kh + (0 .. 31));
+  */
+static inline void get_hash_from_kh(uint8_t       hash[32] __attribute__((unused)),
+                                    const uint8_t kh[32]   __attribute__((unused))) {
+    return;
+}
+
 uint32_t fido_get_auth_counter(void) {
     if (ctr_valid == true) {
         return ctr;
@@ -205,23 +214,14 @@ bool handle_userpresence_backend(uint16_t timeout, const uint8_t appid[FIDO_APPL
     if((action == U2F_FIDO_REGISTER) && (key_handle != NULL)){
         goto err;
     }
+    if ((action == U2F_FIDO_AUTHENTICATE) && (key_handle == NULL)) {
+        goto err;
+    }
     struct msgbuf msgbuf = { 0 };
 
     log_printf("[fido] user presence, timeout is %d ms\n", timeout);
     /* first, get back info from storage, based on appid */
 
-
-#if 0
-    log_printf("[fido] requesting metadata from storage for action %d\n", action);
-    if ((errcode = request_appid_metada(get_storage_msq(), appid, &appid_info, &icon)) != MBED_ERROR_NONE) {
-        printf("[fido] failure while req storage for metadata: err=%x\n", errcode);
-        goto err;
-    }
-    /* all metata received */
-
-    log_printf("[fido] metadata received from storage: dump:\n");
-    fidostorage_dump_slot(&appid_info);
-#endif
 
     log_printf("[fido]sending USER_PRESENCE_REQ to u2fpin\n");
     /* send userpresence request to u2fPIN and wait for METADATA request in response */
@@ -237,9 +237,25 @@ bool handle_userpresence_backend(uint16_t timeout, const uint8_t appid[FIDO_APPL
         printf("[fido] failed to reveive from u2fpin: errno=%d\n", errno);
         goto err;
     }
-    /* setting appid here :-) */
+    /* setting appid and hash(KH) here :-) */
     memcpy(&msgbuf.mtext.u8[0], appid, 32);
+    switch (action) {
+        case U2F_FIDO_REGISTER:
+            /* in case of register, we are looking for template service, for which
+             * HASH(KH) = 0x0 */
+            memset(&msgbuf.mtext.u8[32], 0x0, 32);
+            break;
+        case U2F_FIDO_AUTHENTICATE: {
+            get_hash_from_kh(&msgbuf.mtext.u8[32], &key_handle[0]);
+            break;
+        }
+        default:
+            goto err;
+            /* This action should not happen! */
+            break;
+    }
     /* and transfering to storage */
+    len = 64;
     msgsnd(get_storage_msq(), &msgbuf, len, 0);
     /* transmit back all receiving requests from storage directly to u2fpin */
     bool transmission_finished = false;
