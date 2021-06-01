@@ -30,6 +30,7 @@ static ephemeral_fido_ctx_t fido_ctx = { 0 };
 
 static inline void clear_ephemeral_fido_ctx(ephemeral_fido_ctx_t *ctx) {
     memset(ctx, 0, sizeof(ephemeral_fido_ctx_t));
+    request_data_membarrier();
 }
 
 //static volatile uint32_t ctr;
@@ -177,11 +178,8 @@ mbed_error_t handle_fido_request(int usb_msq)
 
     errcode = u2f_fido_handle_cmd(metadata, &cmd_buf[0], msg_size, &resp_buf[0], &resp_len);
 
-    /* here, if the command was an authenticate and the CTR set, cleaning it */
-    if (fido_ctx.valid == true) {
-        set_u32_with_membarrier(&fido_ctx.ctr, 0);
-        set_bool_with_membarrier(&fido_ctx.valid, false);
-    }
+    /* here, whatever the command was, we can consider that it should be cleaned */
+    clear_ephemeral_fido_ctx(&fido_ctx);
 
     /* return back content */
 
