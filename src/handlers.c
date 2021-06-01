@@ -6,6 +6,7 @@
 #include "libc/nostd.h"
 #include "libc/string.h"
 #include "libc/syscall.h"
+#include "libc/sync.h"
 #include "libc/malloc.h"
 #include "libfidostorage.h"
 
@@ -17,8 +18,22 @@
 #include "generated/bsram_keybag.h"
 
 
-static volatile uint32_t ctr;
-static volatile bool     ctr_valid = false;
+typedef struct ephemeral_fido_ctx {
+    bool        valid;
+    uint8_t     fido_action;
+    uint32_t    ctr;
+    uint8_t     appid[FIDO_APPLICATION_PARAMETER_SIZE];
+    uint8_t     kh[FIDO_KEY_HANDLE_SIZE];
+} ephemeral_fido_ctx_t;
+
+static ephemeral_fido_ctx_t fido_ctx = { 0 };
+
+static inline void clear_ephemeral_fido_ctx(ephemeral_fido_ctx_t *ctx) {
+    memset(ctx, 0, sizeof(ephemeral_fido_ctx_t));
+}
+
+//static volatile uint32_t ctr;
+//static volatile bool     ctr_valid = false;
 
 /*@
   @ requires \valid(hash + (0 .. 31));
@@ -41,8 +56,8 @@ err:
 }
 
 uint32_t fido_get_auth_counter(void) {
-    if (ctr_valid == true) {
-        return ctr;
+    if (fido_ctx.valid == true) {
+        return fido_ctx.ctr;
     }
     return 0;
 }
@@ -163,9 +178,9 @@ mbed_error_t handle_fido_request(int usb_msq)
     errcode = u2f_fido_handle_cmd(metadata, &cmd_buf[0], msg_size, &resp_buf[0], &resp_len);
 
     /* here, if the command was an authenticate and the CTR set, cleaning it */
-    if (ctr_valid == true) {
-        ctr = 0;
-        ctr_valid = false;
+    if (fido_ctx.valid == true) {
+        set_u32_with_membarrier(&fido_ctx.ctr, 0);
+        set_bool_with_membarrier(&fido_ctx.valid, false);
     }
 
     /* return back content */
@@ -228,11 +243,18 @@ bool handle_userpresence_backend(uint16_t timeout, const uint8_t appid[FIDO_APPL
     if ((action == U2F_FIDO_AUTHENTICATE) && (key_handle == NULL)) {
         goto err;
     }
+    if (fido_ctx.valid == true) {
+        printf("a current context is already set!!! should not happen!\n");
+        goto err;
+    }
     struct msgbuf msgbuf = { 0 };
 
     log_printf("[fido] user presence, timeout is %d ms\n", timeout);
     /* first, get back info from storage, based on appid */
 
+    memcpy(&fido_ctx.appid[0], &appid[0], FIDO_APPLICATION_PARAMETER_SIZE);
+    fido_ctx.fido_action = action;
+    request_data_membarrier();
 
     log_printf("[fido]sending USER_PRESENCE_REQ to u2fpin\n");
     /* send userpresence request to u2fPIN and wait for METADATA request in response */
@@ -255,11 +277,15 @@ bool handle_userpresence_backend(uint16_t timeout, const uint8_t appid[FIDO_APPL
             /* in case of register, we are looking for template service, for which
              * HASH(KH) = 0x0 */
             memset(&msgbuf.mtext.u8[32], 0x0, 32);
+            memset(&fido_ctx.kh[0], 0x0, FIDO_KEY_HANDLE_SIZE);
+            request_data_membarrier();
             break;
         case U2F_FIDO_AUTHENTICATE: {
             if(get_hash_from_kh(&msgbuf.mtext.u8[32], &key_handle[0])){
                 goto err;
             }
+            memcpy(&fido_ctx.kh[0], &key_handle[0], FIDO_KEY_HANDLE_SIZE);
+            request_data_membarrier();
             break;
         }
         default:
@@ -281,12 +307,8 @@ bool handle_userpresence_backend(uint16_t timeout, const uint8_t appid[FIDO_APPL
         if (msgbuf.mtype == MAGIC_APPID_METADATA_CTR) {
             /* here we steel the CTR to avoid to get it back again from storage,
              * thanks to our proxy position */
-            if (ctr_valid == true) {
-                printf("a current CTR is already set!!! should not happen!\n");
-                /* XXX: define behavior */
-            }
-            ctr = msgbuf.mtext.u32[0];
-            ctr_valid = true;
+            set_u32_with_membarrier(&fido_ctx.ctr, msgbuf.mtext.u32[0]);
+            set_bool_with_membarrier(&fido_ctx.valid, true);
         }
         if (msgbuf.mtype == MAGIC_APPID_METADATA_END) {
             transmission_finished = true;
