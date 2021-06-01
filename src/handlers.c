@@ -24,12 +24,14 @@ typedef struct ephemeral_fido_ctx {
     uint32_t    ctr;
     uint8_t     appid[FIDO_APPLICATION_PARAMETER_SIZE];
     uint8_t     kh[FIDO_KEY_HANDLE_SIZE];
+    uint8_t     kh_hash[32];
 } ephemeral_fido_ctx_t;
 
 static ephemeral_fido_ctx_t fido_ctx = { 0 };
 
 static inline void clear_ephemeral_fido_ctx(ephemeral_fido_ctx_t *ctx) {
     memset(ctx, 0, sizeof(ephemeral_fido_ctx_t));
+    ctx->valid = false;
     request_data_membarrier();
 }
 
@@ -290,6 +292,7 @@ bool handle_fido_event_backend(uint16_t timeout, const uint8_t appid[FIDO_APPLIC
                 goto err;
             }
             memcpy(&fido_ctx.kh[0], &key_handle[0], FIDO_KEY_HANDLE_SIZE);
+            memcpy(&fido_ctx.kh_hash[0], &msgbuf.mtext.u8[32], 32);
             request_data_membarrier();
             break;
         }
