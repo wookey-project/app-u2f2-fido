@@ -24,9 +24,20 @@ static volatile bool     ctr_valid = false;
   @ requires \valid(hash + (0 .. 31));
   @ requires \valid_read(kh + (0 .. 31));
   */
-static inline void get_hash_from_kh(uint8_t       hash[32] __attribute__((unused)),
-                                    const uint8_t kh[32]   __attribute__((unused))) {
-    return;
+static inline int get_hash_from_kh(uint8_t       hash[32] __attribute__((unused)),
+                                    const uint8_t kh[FIDO_KEY_HANDLE_SIZE]   __attribute__((unused))) {
+    if((hash == NULL) || (kh == NULL)){
+        goto err;
+    }
+    /* Compute the SHA-256 hash of our key handle for anonymization */
+    sha256_context sha256_ctx;
+    sha256_init(&sha256_ctx);
+    sha256_update(&sha256_ctx, kh, FIDO_KEY_HANDLE_SIZE);
+    sha256_final(&sha256_ctx, hash);
+
+    return 0;
+err:
+    return -1;
 }
 
 uint32_t fido_get_auth_counter(void) {
@@ -246,7 +257,9 @@ bool handle_userpresence_backend(uint16_t timeout, const uint8_t appid[FIDO_APPL
             memset(&msgbuf.mtext.u8[32], 0x0, 32);
             break;
         case U2F_FIDO_AUTHENTICATE: {
-            get_hash_from_kh(&msgbuf.mtext.u8[32], &key_handle[0]);
+            if(get_hash_from_kh(&msgbuf.mtext.u8[32], &key_handle[0])){
+                goto err;
+            }
             break;
         }
         default:
