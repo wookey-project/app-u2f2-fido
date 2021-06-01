@@ -17,8 +17,8 @@
 #include "generated/bsram_keybag.h"
 
 
-static uint32_t ctr;
-static bool     ctr_valid = false;
+static volatile uint32_t ctr;
+static volatile bool     ctr_valid = false;
 
 uint32_t fido_get_auth_counter(void) {
     if (ctr_valid == true) {
@@ -192,13 +192,17 @@ volatile bool button_pushed = false;
  * Call for both register & authenticate
  */
 
-bool handle_userpresence_backend(uint16_t timeout, uint8_t *appid, u2f_fido_action action)
+bool handle_userpresence_backend(uint16_t timeout, const uint8_t appid[FIDO_APPLICATION_PARAMETER_SIZE], const uint8_t key_handle[FIDO_KEY_HANDLE_SIZE], u2f_fido_action action)
 {
     /* wait half of duration and return ok by now */
     button_pushed = false;
     ssize_t len;
 
+    /* Sanity checks */
     if (appid == NULL) {
+        goto err;
+    }
+    if((action == U2F_FIDO_REGISTER) && (key_handle != NULL)){
         goto err;
     }
     struct msgbuf msgbuf = { 0 };
