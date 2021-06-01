@@ -225,7 +225,7 @@ volatile bool button_pushed = false;
  * Call for both register & authenticate
  */
 
-bool handle_userpresence_backend(uint16_t timeout, const uint8_t appid[FIDO_APPLICATION_PARAMETER_SIZE], const uint8_t key_handle[FIDO_KEY_HANDLE_SIZE], u2f_fido_action action)
+bool handle_fido_event_backend(uint16_t timeout, const uint8_t appid[FIDO_APPLICATION_PARAMETER_SIZE], const uint8_t key_handle[FIDO_KEY_HANDLE_SIZE], u2f_fido_action action)
 {
     /* wait half of duration and return ok by now */
     button_pushed = false;
@@ -241,6 +241,9 @@ bool handle_userpresence_backend(uint16_t timeout, const uint8_t appid[FIDO_APPL
     if ((action == U2F_FIDO_AUTHENTICATE) && (key_handle == NULL)) {
         goto err;
     }
+    if ((action == U2F_FIDO_CHECK_ONLY) && (key_handle == NULL)) {
+        goto err;
+    }
     if (fido_ctx.valid == true) {
         printf("a current context is already set!!! should not happen!\n");
         goto err;
@@ -254,19 +257,22 @@ bool handle_userpresence_backend(uint16_t timeout, const uint8_t appid[FIDO_APPL
     fido_ctx.fido_action = action;
     request_data_membarrier();
 
-    log_printf("[fido]sending USER_PRESENCE_REQ to u2fpin\n");
-    /* send userpresence request to u2fPIN and wait for METADATA request in response */
-    msgbuf.mtext.u16[0] = timeout;
-    msgbuf.mtext.u16[1] = action;
-    /* sending appid */
-    msgbuf.mtype = MAGIC_USER_PRESENCE_REQ,
-    msgsnd(get_u2fpin_msq(), &msgbuf, 2*sizeof(uint16_t), 0);
-    /* waiting for get_metadata() as a response */
-    log_printf("[fido] now waiting for get_metadata reception from u2fpin\n");
-    /* receiving GET_METADATA from u2fpin.... */
-    if ((len = msgrcv(get_u2fpin_msq(), &msgbuf, 64, MAGIC_STORAGE_GET_METADATA, 0)) == -1) {
-        printf("[fido] failed to reveive from u2fpin: errno=%d\n", errno);
-        goto err;
+    /* Ask GUI backend except when dealing with CHECK ONLY */
+    if((action == U2F_FIDO_REGISTER) || (action == U2F_FIDO_AUTHENTICATE)){
+        log_printf("[fido]sending USER_PRESENCE_REQ to u2fpin\n");
+        /* send userpresence request to u2fPIN and wait for METADATA request in response */
+        msgbuf.mtext.u16[0] = timeout;
+        msgbuf.mtext.u16[1] = action;
+        /* sending appid */
+        msgbuf.mtype = MAGIC_USER_PRESENCE_REQ,
+        msgsnd(get_u2fpin_msq(), &msgbuf, 2*sizeof(uint16_t), 0);
+        /* waiting for get_metadata() as a response */
+        log_printf("[fido] now waiting for get_metadata reception from u2fpin\n");
+        /* receiving GET_METADATA from u2fpin.... */
+        if ((len = msgrcv(get_u2fpin_msq(), &msgbuf, 64, MAGIC_STORAGE_GET_METADATA, 0)) == -1) {
+            printf("[fido] failed to reveive from u2fpin: errno=%d\n", errno);
+            goto err;
+        }
     }
     /* setting appid and hash(KH) here :-) */
     memcpy(&msgbuf.mtext.u8[0], appid, 32);
@@ -278,6 +284,7 @@ bool handle_userpresence_backend(uint16_t timeout, const uint8_t appid[FIDO_APPL
             memset(&fido_ctx.kh[0], 0x0, FIDO_KEY_HANDLE_SIZE);
             request_data_membarrier();
             break;
+        case U2F_FIDO_CHECK_ONLY:
         case U2F_FIDO_AUTHENTICATE: {
             if(get_hash_from_kh(&msgbuf.mtext.u8[32], &key_handle[0])){
                 goto err;
@@ -297,13 +304,17 @@ bool handle_userpresence_backend(uint16_t timeout, const uint8_t appid[FIDO_APPL
     /* transmit back all receiving requests from storage directly to u2fpin */
     bool transmission_finished = false;
     while (!transmission_finished) {
-        /* reading any msg from u2fpin */
+        /* reading any msg from storage */
         if ((len = msgrcv(get_storage_msq(), &msgbuf, 64, 0, 0)) == -1) {
             printf("[fido] failed to reveive from storage: errno=%d\n", errno);
             goto err;
         }
+        if(action == U2F_FIDO_CHECK_ONLY){
+            /* In CHECK ONLY mode, this is it, storage is OK and we can sefely continue! */
+            return true;
+        }
         if (msgbuf.mtype == MAGIC_APPID_METADATA_CTR) {
-            /* here we steel the CTR to avoid to get it back again from storage,
+            /* here we steal the CTR to avoid to get it back again from storage,
              * thanks to our proxy position */
             set_u32_with_membarrier(&fido_ctx.ctr, msgbuf.mtext.u32[0]);
             set_bool_with_membarrier(&fido_ctx.valid, true);

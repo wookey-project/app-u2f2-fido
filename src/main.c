@@ -730,8 +730,8 @@ int _main(uint32_t task_id)
     /*U2FAPDU & FIDO are handled here, direct callback access */
 
     /* TODO callbacks protection */
-    ADD_LOC_HANDLER(handle_userpresence_backend);
-    u2f_fido_initialize(handle_userpresence_backend);
+    ADD_LOC_HANDLER(handle_fido_event_backend);
+    u2f_fido_initialize(handle_fido_event_backend);
 
     /*******************************************
      * End of init sequence, let's initialize devices
