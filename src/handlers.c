@@ -279,9 +279,21 @@ volatile bool button_pushed = false;
 bool handle_fido_post_crypto_event_backend(uint16_t timeout __attribute__((unused)), const uint8_t appid[FIDO_APPLICATION_PARAMETER_SIZE] __attribute__((unused)), const uint8_t key_handle[FIDO_KEY_HANDLE_SIZE] __attribute__((unused)), u2f_fido_action action)
 {
 
-    printf("[FIDO] Post crypto event arise, action=%d\n", action);
+    log_printf("[FIDO] Post crypto event arise, action=%d\n", action);
+    if((fido_ctx.valid != true) || (fido_ctx.fido_action != U2F_FIDO_REGISTER)){
+        /* Should not happen */
+        log_printf("[FIDO] fido ctx not valid!\n");
+        goto err;
+    }
+    if(get_hash_from_kh(&fido_ctx.kh_hash[0], &key_handle[0])){
+        goto err;
+    }
+    memcpy(&fido_ctx.kh[0], &key_handle[0], FIDO_KEY_HANDLE_SIZE);
+    request_data_membarrier();
 
     return true;
+err:
+    return false;
 }
 
 /*
