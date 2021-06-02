@@ -20,6 +20,7 @@
 
 typedef struct ephemeral_fido_ctx {
     bool        valid;
+    bool        metada_exist;
     uint8_t     fido_action;
     uint32_t    ctr;
     uint8_t     appid[FIDO_APPLICATION_PARAMETER_SIZE];
@@ -32,6 +33,7 @@ static ephemeral_fido_ctx_t fido_ctx = { 0 };
 static inline void clear_ephemeral_fido_ctx(ephemeral_fido_ctx_t *ctx) {
     memset(ctx, 0, sizeof(ephemeral_fido_ctx_t));
     ctx->valid = false;
+    ctx->metada_exist = false;
     request_data_membarrier();
 }
 
@@ -179,6 +181,19 @@ mbed_error_t handle_fido_request(int usb_msq)
     cmd_buf[msg_size] = 0x0;
 
     errcode = u2f_fido_handle_cmd(metadata, &cmd_buf[0], msg_size, &resp_buf[0], &resp_len);
+    if(errcode != MBED_ERROR_NONE){
+        goto err;
+    }
+    /* Now, in case of a REGISTER, use a possible existing template */
+    if((fido_ctx.valid == true) && (fido_ctx.mode == U2F_FIDO_REGISTER) && (fido_ctx.metada_exist == true)){
+        msgbuf.mtype = MAGIC_STORAGE_SET_METADATA;
+        msg_size = 1;
+        mtext.u8[0] = STORAGE_MODE_NEW_FROM_SCRATCH;
+        if (msgsnd(get_u2fpin_msq(), &msgbuf, len, 0) == -1) {
+            printf("[fido] failed when transmitting to u2fpin: errno=%d\n", errno);
+        }
+    }
+
 
     /* here, whatever the command was, we can consider that it should be cleaned */
     clear_ephemeral_fido_ctx(&fido_ctx);
@@ -217,6 +232,7 @@ mbed_error_t handle_fido_request(int usb_msq)
     msgsnd(usb_msq, &msgbuf, 1, 0);
 
 err:
+    clear_ephemeral_fido_ctx(&fido_ctx);
     return errcode;
 }
 
@@ -326,6 +342,7 @@ bool handle_fido_event_backend(uint16_t timeout, const uint8_t appid[FIDO_APPLIC
         }
         if (len != 1)  {
             /* XXX: invalid response len */
+            goto err;
         }
         button_pushed = false;
         switch (msgbuf.mtext.u8[0]) {
@@ -367,6 +384,14 @@ bool handle_fido_event_backend(uint16_t timeout, const uint8_t appid[FIDO_APPLIC
             if (msgsnd(get_u2fpin_msq(), &msgbuf, len, 0) == -1) {
                 printf("[fido] failed when transmitting to u2fpin: errno=%d\n", errno);
             }
+            if (msgbuf.mtype == MAGIC_APPID_METADATA_STATUS) {
+                if (msgbuf.mtype.mtext.u8[0] == 0xff) {
+                    fido_ctx.metada_exist = true;
+                }
+                else{
+                    fido_ctx.metada_exist = false;
+                }
+             }
         }
         /* ... and wait for u2fpin acknowledge */
         log_printf("[fido] waiting for User presence ACK to FIDO\n");
