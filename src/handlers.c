@@ -20,7 +20,7 @@
 
 typedef struct ephemeral_fido_ctx {
     bool        valid;
-    bool        metada_exist;
+    bool        metadata_exist;
     uint8_t     fido_action;
     uint32_t    ctr;
     uint8_t     appid[FIDO_APPLICATION_PARAMETER_SIZE];
@@ -33,7 +33,7 @@ static ephemeral_fido_ctx_t fido_ctx = { 0 };
 static inline void clear_ephemeral_fido_ctx(ephemeral_fido_ctx_t *ctx) {
     memset(ctx, 0, sizeof(ephemeral_fido_ctx_t));
     ctx->valid = false;
-    ctx->metada_exist = false;
+    ctx->metadata_exist = false;
     request_data_membarrier();
 }
 
@@ -185,18 +185,35 @@ mbed_error_t handle_fido_request(int usb_msq)
         goto err;
     }
     /* Now, in case of a REGISTER, use a possible existing template */
-    if((fido_ctx.valid == true) && (fido_ctx.mode == U2F_FIDO_REGISTER) && (fido_ctx.metada_exist == true)){
+    if((fido_ctx.valid == true) && (fido_ctx.fido_action == U2F_FIDO_REGISTER)) {
+        /* sending set_metadata request, specifying set mode */
+        if (fido_ctx.metadata_exist == true) {
+            msgbuf.mtext.u8[0] = STORAGE_MODE_NEW_FROM_TEMPLATE;
+        } else {
+            msgbuf.mtext.u8[0] = STORAGE_MODE_NEW_FROM_SCRATCH;
+        }
         msgbuf.mtype = MAGIC_STORAGE_SET_METADATA;
         msg_size = 1;
-        mtext.u8[0] = STORAGE_MODE_NEW_FROM_SCRATCH;
-        if (msgsnd(get_u2fpin_msq(), &msgbuf, len, 0) == -1) {
-            printf("[fido] failed when transmitting to u2fpin: errno=%d\n", errno);
+        if (unlikely(msgsnd(get_storage_msq(), &msgbuf, msg_size, 0) == -1)) {
+            printf("[fido] failed when transmitting set_meta to storage: errno=%d\n", errno);
+            goto err;
         }
-    }
-
-
-    if (errcode != MBED_ERROR_NONE) {
-        goto err;
+        /* then sending the associated identifiers */
+        msgbuf.mtype = MAGIC_APPID_METADATA_IDENTIFIERS;
+        memcpy(&msgbuf.mtext.u8[0], &fido_ctx.appid[0], FIDO_APPLICATION_PARAMETER_SIZE);
+        memcpy(&msgbuf.mtext.u8[FIDO_APPLICATION_PARAMETER_SIZE], &fido_ctx.kh_hash, 32);
+        msg_size = 64;
+        if (unlikely(msgsnd(get_storage_msq(), &msgbuf, msg_size, 0) == -1)) {
+            printf("[fido] failed when transmitting identifiers to storage: errno=%d\n", errno);
+            goto err;
+        }
+        /* and close the transmission */
+        msgbuf.mtype = MAGIC_APPID_METADATA_END;
+        msg_size = 0;
+        if (unlikely(msgsnd(get_storage_msq(), &msgbuf, msg_size, 0) == -1)) {
+            printf("[fido] failed when transmitting end_of_set to storage: errno=%d\n", errno);
+            goto err;
+        }
     }
 
     /* here, whatever the command was, we can consider that it should be cleaned */
@@ -389,11 +406,11 @@ bool handle_fido_event_backend(uint16_t timeout, const uint8_t appid[FIDO_APPLIC
                 printf("[fido] failed when transmitting to u2fpin: errno=%d\n", errno);
             }
             if (msgbuf.mtype == MAGIC_APPID_METADATA_STATUS) {
-                if (msgbuf.mtype.mtext.u8[0] == 0xff) {
-                    fido_ctx.metada_exist = true;
+                if (msgbuf.mtext.u8[0] == 0xff) {
+                    fido_ctx.metadata_exist = true;
                 }
                 else{
-                    fido_ctx.metada_exist = false;
+                    fido_ctx.metadata_exist = false;
                 }
              }
         }
