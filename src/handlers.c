@@ -180,6 +180,10 @@ mbed_error_t handle_fido_request(int usb_msq)
 
     errcode = u2f_fido_handle_cmd(metadata, &cmd_buf[0], msg_size, &resp_buf[0], &resp_len);
 
+    if (errcode != MBED_ERROR_NONE) {
+        goto err;
+    }
+
     /* here, whatever the command was, we can consider that it should be cleaned */
     clear_ephemeral_fido_ctx(&fido_ctx);
 
@@ -217,6 +221,7 @@ mbed_error_t handle_fido_request(int usb_msq)
     msgsnd(usb_msq, &msgbuf, 1, 0);
 
 err:
+    clear_ephemeral_fido_ctx(&fido_ctx);
     return errcode;
 }
 
