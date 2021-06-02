@@ -305,6 +305,8 @@ bool handle_fido_event_backend(uint16_t timeout, const uint8_t appid[FIDO_APPLIC
         printf("a current context is already set!!! should not happen!\n");
         goto err;
     }
+
+    set_bool_with_membarrier(&fido_ctx.valid, true);
     struct msgbuf msgbuf = { 0 };
 
     log_printf("[fido] user presence, timeout is %d ms\n", timeout);
@@ -415,7 +417,6 @@ bool handle_fido_event_backend(uint16_t timeout, const uint8_t appid[FIDO_APPLIC
                 /* here we steal the CTR to avoid to get it back again from storage,
                  * thanks to our proxy position */
                 set_u32_with_membarrier(&fido_ctx.ctr, msgbuf.mtext.u32[0]);
-                set_bool_with_membarrier(&fido_ctx.valid, true);
             }
             if (msgbuf.mtype == MAGIC_APPID_METADATA_END) {
                 transmission_finished = true;
