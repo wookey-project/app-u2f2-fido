@@ -30,6 +30,19 @@ typedef struct ephemeral_fido_ctx {
 
 static ephemeral_fido_ctx_t fido_ctx = { 0 };
 
+
+static inline void dump_ephemeral(void) {
+    printf("ephemeral fido ctx:\n");
+    printf("-> valid: %d\n", fido_ctx.valid);
+    printf("-> meta_exists: %d\n", fido_ctx.metadata_exist);
+    printf("-> fido_action: %d\n", fido_ctx.fido_action);
+    printf("-> ctr: %d\n", fido_ctx.ctr);
+    printf("-> appid:\n");
+    hexdump(&fido_ctx.appid[0], FIDO_APPLICATION_PARAMETER_SIZE);
+    printf("-> kh_hash:\n");
+    hexdump(&fido_ctx.kh_hash[0], 32);
+}
+
 static inline void clear_ephemeral_fido_ctx(ephemeral_fido_ctx_t *ctx) {
     memset(ctx, 0, sizeof(ephemeral_fido_ctx_t));
     ctx->valid = false;
@@ -184,8 +197,11 @@ mbed_error_t handle_fido_request(int usb_msq)
     if(errcode != MBED_ERROR_NONE){
         goto err;
     }
+    printf("[FIDO] end of command handling of action %d\n", fido_ctx.fido_action);
+    dump_ephemeral();
     /* Now, in case of a REGISTER, use a possible existing template */
     if((fido_ctx.valid == true) && (fido_ctx.fido_action == U2F_FIDO_REGISTER)) {
+        printf("[FIDO] REGISTER action posthook\n");
         /* sending set_metadata request, specifying set mode */
         if (fido_ctx.metadata_exist == true) {
             msgbuf.mtext.u8[0] = STORAGE_MODE_NEW_FROM_TEMPLATE;
@@ -270,6 +286,8 @@ bool handle_fido_event_backend(uint16_t timeout, const uint8_t appid[FIDO_APPLIC
     button_pushed = false;
     ssize_t len;
 
+
+    printf("[FIDO] event arise, action=%d\n", action);
     /* Sanity checks */
     if (appid == NULL) {
         goto err;
@@ -423,5 +441,9 @@ bool handle_fido_event_backend(uint16_t timeout, const uint8_t appid[FIDO_APPLIC
         }
     }
 err:
+    request_data_membarrier();
+    printf("[fido] end of triggered event\n");
+    dump_ephemeral();
+
     return button_pushed;
 }
