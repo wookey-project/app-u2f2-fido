@@ -731,7 +731,8 @@ int _main(uint32_t task_id)
 
     /* TODO callbacks protection */
     ADD_LOC_HANDLER(handle_fido_event_backend);
-    u2f_fido_initialize(handle_fido_event_backend);
+    ADD_LOC_HANDLER(handle_fido_post_crypto_event_backend);
+    u2f_fido_initialize(handle_fido_event_backend, handle_fido_post_crypto_event_backend);
 
     /*******************************************
      * End of init sequence, let's initialize devices

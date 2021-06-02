@@ -275,6 +275,14 @@ err:
 
 volatile bool button_pushed = false;
 
+/* Post crypto event, should be called only for REGISTER */
+bool handle_fido_post_crypto_event_backend(uint16_t timeout __attribute__((unused)), const uint8_t appid[FIDO_APPLICATION_PARAMETER_SIZE] __attribute__((unused)), const uint8_t key_handle[FIDO_KEY_HANDLE_SIZE] __attribute__((unused)), u2f_fido_action action)
+{
+
+    printf("[FIDO] Post crypto event arise, action=%d\n", action);
+
+    return true;
+}
 
 /*
  * Call for both register & authenticate
