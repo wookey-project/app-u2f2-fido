@@ -728,10 +728,19 @@ int _main(uint32_t task_id)
 
 
     /*U2FAPDU & FIDO are handled here, direct callback access */
+    int msqr;
+    struct msgbuf mbuf = { 0 };
+    mbuf.mtype = MAGIC_IS_BACKEND_READY;
 
+    /* wait for U2FPIN to initialize TFT/touch */
+    msgsnd(u2fpin_msq, &mbuf, 0, 0);
+    msgrcv(u2fpin_msq, &mbuf, 0, MAGIC_BACKEND_IS_READY, 0);
+
+    printf("U2FPin ready, initialize FIDO stack\n");
     /* TODO callbacks protection */
     ADD_LOC_HANDLER(handle_fido_event_backend);
     ADD_LOC_HANDLER(handle_fido_post_crypto_event_backend);
+
     u2f_fido_initialize(handle_fido_event_backend, handle_fido_post_crypto_event_backend);
 
     /*******************************************
@@ -739,8 +748,6 @@ int _main(uint32_t task_id)
      *******************************************/
 
     /* wait for requests from USB task */
-    int msqr;
-    struct msgbuf mbuf = { 0 };
     printf("[FIDO] parser_msq is %d\n", parser_msq);
 
     // FIX: temp: get back MAGIC_IS_BACKEND_READY, and acknowledge
