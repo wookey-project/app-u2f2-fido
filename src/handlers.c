@@ -80,16 +80,17 @@ uint32_t fido_get_auth_counter(void) {
     return 0;
 }
 
-void fido_inc_auth_counter(const uint8_t *appid, uint16_t appid_len) {
+void fido_inc_auth_counter(void) {
 
     struct msgbuf msgbuf = { 0 };
     msgbuf.mtype = MAGIC_STORAGE_INC_CTR;
-    if (appid_len > 64) {
-        printf("[fido] appid len too big!\n");
+    if ((fido_ctx.valid == false) || (fido_ctx.fido_action != U2F_FIDO_AUTHENTICATE)) {
+        printf("[fido] bad fido ephemeral context\n");
         goto err;
     }
-    memcpy(&msgbuf.mtext.u8[0], appid, appid_len);
-    if (msgsnd(get_storage_msq(), &msgbuf, appid_len, 0) < 0) {
+    memcpy(&msgbuf.mtext.u8[0], &fido_ctx.appid, 32);
+    memcpy(&msgbuf.mtext.u8[32], &fido_ctx.kh_hash, 32);
+    if (msgsnd(get_storage_msq(), &msgbuf, 64, 0) < 0) {
         printf("[fido] failed to send CTR inc to storage!\n");
     }
 
@@ -150,7 +151,7 @@ mbed_error_t handle_fido_request(int usb_msq)
         goto err;
     }
     msg_size = msgbuf.mtext.u16[0];
-    printf("[FIDO] received APDU_CMD_MSG_LEN from USB (len is %d)\n", msg_size);
+    log_printf("[FIDO] received APDU_CMD_MSG_LEN from USB (len is %d)\n", msg_size);
 
     /* calculating number of messages */
     uint32_t num_full_msg = msg_size / 64;
@@ -182,7 +183,7 @@ mbed_error_t handle_fido_request(int usb_msq)
         offset += ret;
     }
     if (offset != msg_size) {
-        log_printf("[FIDO] Received data size %x does not match specified one %x\n", offset, msg_size);
+        printf("[FIDO] Received data size %x does not match specified one %x\n", offset, msg_size);
         errcode = MBED_ERROR_RDERROR;
         goto err;
     }
@@ -197,11 +198,11 @@ mbed_error_t handle_fido_request(int usb_msq)
     if(errcode != MBED_ERROR_NONE){
         goto err;
     }
-    printf("[FIDO] end of command handling of action %d\n", fido_ctx.fido_action);
+    log_printf("[FIDO] end of command handling of action %d\n", fido_ctx.fido_action);
     dump_ephemeral();
     /* Now, in case of a REGISTER, use a possible existing template */
     if((fido_ctx.valid == true) && (fido_ctx.fido_action == U2F_FIDO_REGISTER)) {
-        printf("[FIDO] REGISTER action posthook\n");
+        log_printf("[FIDO] REGISTER action posthook\n");
         /* sending set_metadata request, specifying set mode */
         if (fido_ctx.metadata_exist == true) {
             msgbuf.mtext.u8[0] = STORAGE_MODE_NEW_FROM_TEMPLATE;
@@ -252,14 +253,14 @@ mbed_error_t handle_fido_request(int usb_msq)
     for (i = 0; i < num_full_msg; ++i) {
         msgbuf.mtype = MAGIC_APDU_RESP_MSG;
         memcpy(&msgbuf.mtext.u8[0], &resp_buf[offset], msgsz);
-        log_printf("[FIDO] Send APDU_RESP_MSG (pkt %d) to USB\n", i);
+        printf("[FIDO] Send APDU_RESP_MSG (pkt %d) to USB\n", i);
         msgsnd(usb_msq, &msgbuf, msgsz, 0);
         offset += msgsz;
     }
     if (residual_msg != 0) {
         msgbuf.mtype = MAGIC_APDU_RESP_MSG;
         memcpy(&msgbuf.mtext.u8[0], &resp_buf[offset], residual_msg);
-        log_printf("[FIDO] Send APDU_RESP_MSG (pkt %d, residual) to USB\n", i);
+        printf("[FIDO] Send APDU_RESP_MSG (pkt %d, residual) to USB\n", i);
         msgsnd(usb_msq, &msgbuf, residual_msg, 0);
         offset += residual_msg;
     }
@@ -282,7 +283,7 @@ bool handle_fido_post_crypto_event_backend(uint16_t timeout __attribute__((unuse
     log_printf("[FIDO] Post crypto event arise, action=%d\n", action);
     if((fido_ctx.valid != true) || (fido_ctx.fido_action != U2F_FIDO_REGISTER)){
         /* Should not happen */
-        log_printf("[FIDO] fido ctx not valid!\n");
+        printf("[FIDO] fido ctx not valid!\n");
         goto err;
     }
     if(get_hash_from_kh(&fido_ctx.kh_hash[0], &key_handle[0])){
@@ -307,7 +308,7 @@ bool handle_fido_event_backend(uint16_t timeout, const uint8_t appid[FIDO_APPLIC
     ssize_t len;
 
 
-    printf("[FIDO] event arise, action=%d\n", action);
+    log_printf("[FIDO] event arise, action=%d\n", action);
     /* Sanity checks */
     if (appid == NULL) {
         goto err;
@@ -341,7 +342,7 @@ bool handle_fido_event_backend(uint16_t timeout, const uint8_t appid[FIDO_APPLIC
     }
     /* Ask GUI backend except when dealing with CHECK ONLY */
     if((action == U2F_FIDO_REGISTER) || (action == U2F_FIDO_AUTHENTICATE)){
-        log_printf("[fido]sending USER_PRESENCE_REQ to u2fpin\n");
+        printf("[fido]sending USER_PRESENCE_REQ to u2fpin\n");
         /* send userpresence request to u2fPIN and wait for METADATA request in response */
         msgbuf.mtext.u16[0] = timeout;
         msgbuf.mtext.u16[1] = action;
@@ -349,7 +350,7 @@ bool handle_fido_event_backend(uint16_t timeout, const uint8_t appid[FIDO_APPLIC
         msgbuf.mtype = MAGIC_USER_PRESENCE_REQ;
         msgsnd(get_u2fpin_msq(), &msgbuf, 2*sizeof(uint16_t), 0);
         /* waiting for get_metadata() as a response */
-        log_printf("[fido] now waiting for get_metadata reception from u2fpin\n");
+        printf("[fido] now waiting for get_metadata reception from u2fpin\n");
         /* receiving GET_METADATA from u2fpin.... */
         if ((len = msgrcv(get_u2fpin_msq(), &msgbuf, 64, MAGIC_STORAGE_GET_METADATA, 0)) == -1) {
             printf("[fido] failed to reveive from u2fpin: errno=%d\n", errno);
@@ -463,7 +464,7 @@ bool handle_fido_event_backend(uint16_t timeout, const uint8_t appid[FIDO_APPLIC
     }
 err:
     request_data_membarrier();
-    printf("[fido] end of triggered event\n");
+    log_printf("[fido] end of triggered event, ret = %d\n", button_pushed);
     dump_ephemeral();
 
     return button_pushed;
