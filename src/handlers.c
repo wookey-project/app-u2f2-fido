@@ -280,7 +280,7 @@ err:
 volatile bool button_pushed = false;
 
 /* Post crypto event, should be called only for REGISTER */
-bool handle_fido_post_crypto_event_backend(uint16_t timeout __attribute__((unused)), const uint8_t appid[FIDO_APPLICATION_PARAMETER_SIZE] __attribute__((unused)), const uint8_t key_handle[FIDO_KEY_HANDLE_SIZE] __attribute__((unused)), u2f_fido_action action __attribute__((unused)))
+bool handle_fido_post_crypto_event_backend(uint16_t timeout __attribute__((unused)), const uint8_t appid[FIDO_APPLICATION_PARAMETER_SIZE] __attribute__((unused)), const uint8_t key_handle[FIDO_KEY_HANDLE_SIZE] __attribute__((unused)), u2f_fido_action action __attribute__((unused)), bool *existing __attribute__((unused)))
 {
 
     log_printf("[FIDO] Post crypto event arise, action=%d\n", action);
@@ -304,12 +304,14 @@ err:
  * Call for both register & authenticate
  */
 
-bool handle_fido_event_backend(uint16_t timeout, const uint8_t appid[FIDO_APPLICATION_PARAMETER_SIZE], const uint8_t key_handle[FIDO_KEY_HANDLE_SIZE], u2f_fido_action action)
+bool handle_fido_event_backend(uint16_t timeout, const uint8_t appid[FIDO_APPLICATION_PARAMETER_SIZE], const uint8_t key_handle[FIDO_KEY_HANDLE_SIZE], u2f_fido_action action, bool *existing)
 {
     /* wait half of duration and return ok by now */
     button_pushed = false;
     ssize_t len;
-
+    if(existing != NULL){
+        *existing = false;
+    }
 
     log_printf("[FIDO] event arise, action=%d\n", action);
     /* Sanity checks */
@@ -450,9 +452,15 @@ bool handle_fido_event_backend(uint16_t timeout, const uint8_t appid[FIDO_APPLIC
             if (msgbuf.mtype == MAGIC_APPID_METADATA_STATUS) {
                 if (msgbuf.mtext.u8[0] == 0xff) {
                     fido_ctx.metadata_exist = true;
+                    if(existing != NULL){
+                        *existing = true;
+                    }
                 }
                 else{
                     fido_ctx.metadata_exist = false;
+                    if(existing != NULL){
+                        *existing = false;
+                    }
                 }
              }
         }
@@ -469,8 +477,14 @@ bool handle_fido_event_backend(uint16_t timeout, const uint8_t appid[FIDO_APPLIC
      */
     if((fido_ctx.valid == true) && ((fido_ctx.fido_action == U2F_FIDO_AUTHENTICATE) || (fido_ctx.fido_action == U2F_FIDO_CHECK_ONLY))) {
         if(fido_ctx.metadata_exist == false){
-            printf("[fido] metadata do not exist in case of AUTHENTICATE or CHECK_ONLY! Protect the user\n");
-            button_pushed = false;
+            log_printf("[fido] metadata do not exist in case of AUTHENTICATE or CHECK_ONLY!\n");
+            if(fido_ctx.fido_action == U2F_FIDO_CHECK_ONLY){
+                /* In case of check only, no button pressed! */
+                button_pushed = false;
+            }
+            if(existing != NULL){
+                *existing = false;
+            }
             goto err;
         }
     }
