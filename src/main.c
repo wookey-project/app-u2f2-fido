@@ -98,28 +98,17 @@ int callback_fido_register(const uint8_t *app_data, uint16_t app_data_len, uint8
 			goto err;
 		}
 		retries_reg++;
-#if 0
-		/* Try to renegotiate */
-		ec_curve_type curve = fido_get_token_channel()->curve;
+	        /* Reinitialize our token */
                 token_zeroize_secure_channel(fido_get_token_channel());
-                unsigned int remaining_tries = 0;
-                if(token_secure_channel_init(fido_get_token_channel(), saved_decrypted_keybag[1].data, saved_decrypted_keybag[1].size, saved_decrypted_keybag[2].data, saved_decrypted_keybag[2].size, saved_decrypted_keybag[0].data, saved_decrypted_keybag[0].size, curve, &remaining_tries)){
-		    printf("[APP FIDO] secure channel renegotiate failed ...\n");
-#endif
-		    /* Reinitialize our token */
-                    token_zeroize_secure_channel(fido_get_token_channel());
-		    while(wrap_auth_token_exchanges(fido_get_token_channel(), NULL, true)){
+	        while(wrap_auth_token_exchanges(fido_get_token_channel(), NULL, true)){
 		        printf("[APP FIDO] token reinit failed ...\n");
   	                if(retries_wrap > MAX_RETRIES){
 			    goto err;
 		        }
   	 	        retries_wrap++;
-                    }
-#if 0
                 }
-#endif
-              _key_handle_len = *key_handle_len;
-              _ecdsa_priv_key_len = *ecdsa_priv_key_len;
+                _key_handle_len = *key_handle_len;
+                _ecdsa_priv_key_len = *ecdsa_priv_key_len;
 	}
 	if(_key_handle_len > (unsigned int)0xFFFF){
 		goto err;
@@ -157,26 +146,15 @@ int callback_fido_authenticate(const uint8_t *app_data, uint16_t app_data_len, c
 			    goto err;
   		        }
  		        retries_auth++;
-#if 0
-			/* Try to renegotiate */
-		        ec_curve_type curve = fido_get_token_channel()->curve;
+   		        /* Reinitialize our token */
         	        token_zeroize_secure_channel(fido_get_token_channel());
-                	unsigned int remaining_tries = 0;
-	                if(token_secure_channel_init(fido_get_token_channel(), saved_decrypted_keybag[1].data, saved_decrypted_keybag[1].size, saved_decrypted_keybag[2].data, saved_decrypted_keybag[2].size, saved_decrypted_keybag[0].data, saved_decrypted_keybag[0].size, curve, &remaining_tries)){
-  		            printf("[APP FIDO] secure channel renegotiate failed ...\n");
-#endif
-   		            /* Reinitialize our token */
-        	            token_zeroize_secure_channel(fido_get_token_channel());
-      		            while(wrap_auth_token_exchanges(fido_get_token_channel(), NULL, true)){
-		                printf("[APP FIDO] token reinit failed ...\n");
-  		                if(retries_wrap > MAX_RETRIES){
-			            goto err;
-  		                }
-  		                retries_wrap++;
-                            }
-#if 0
-                	}
-#endif
+      		        while(wrap_auth_token_exchanges(fido_get_token_channel(), NULL, true)){
+		            printf("[APP FIDO] token reinit failed ...\n");
+  		            if(retries_wrap > MAX_RETRIES){
+		                goto err;
+  		             }
+  		            retries_wrap++;
+                       }
 		}
 	}
 	else{
@@ -186,27 +164,16 @@ int callback_fido_authenticate(const uint8_t *app_data, uint16_t app_data_len, c
 			    goto err;
   		        }
  		        retries_auth++;
-#if 0
-			/* Try to renegotiate */
-		        ec_curve_type curve = fido_get_token_channel()->curve;
+ 		        /* Reinitialize our token */
         	        token_zeroize_secure_channel(fido_get_token_channel());
-                	unsigned int remaining_tries = 0;
-	                if(token_secure_channel_init(fido_get_token_channel(), saved_decrypted_keybag[1].data, saved_decrypted_keybag[1].size, saved_decrypted_keybag[2].data, saved_decrypted_keybag[2].size, saved_decrypted_keybag[0].data, saved_decrypted_keybag[0].size, curve, &remaining_tries)){
-  		            printf("[APP FIDO] secure channel renegotiate failed ...\n");
-#endif
-   		            /* Reinitialize our token */
-        	            token_zeroize_secure_channel(fido_get_token_channel());
-      		            while(wrap_auth_token_exchanges(fido_get_token_channel(), NULL, true)){
-		                printf("[APP FIDO] token reinit failed ...\n");
-  		                if(retries_wrap > MAX_RETRIES){
-			            goto err;
-  		                }
-  		                retries_wrap++;
-                            }
-#if 0
-                	}
-#endif
-		    _ecdsa_priv_key_len = *ecdsa_priv_key_len;
+      		        while(wrap_auth_token_exchanges(fido_get_token_channel(), NULL, true)){
+		            printf("[APP FIDO] token reinit failed ...\n");
+  		            if(retries_wrap > MAX_RETRIES){
+			        goto err;
+  		            }
+  		            retries_wrap++;
+                        }
+  		        _ecdsa_priv_key_len = *ecdsa_priv_key_len;
 		}
 		if(_ecdsa_priv_key_len > (unsigned int)0xFFFF){
 			goto err;

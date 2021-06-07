@@ -194,12 +194,14 @@ mbed_error_t handle_fido_request(int usb_msq)
     //hexdump(cmd_buf, msg_size);
     cmd_buf[msg_size] = 0x0;
 
-    errcode = u2f_fido_handle_cmd(metadata, &cmd_buf[0], msg_size, &resp_buf[0], &resp_len);
+    int fido_error;
+    errcode = u2f_fido_handle_cmd(metadata, &cmd_buf[0], msg_size, &resp_buf[0], &resp_len, &fido_error);
     if(errcode != MBED_ERROR_NONE){
+        printf("[FIDO] Error after u2f_fido_handle_cmd\n");
         goto err;
     }
     log_printf("[FIDO] end of command handling of action %d\n", fido_ctx.fido_action);
-    dump_ephemeral();
+    //dump_ephemeral();
     /* Now, in case of a REGISTER, use a possible existing template */
     if((fido_ctx.valid == true) && (fido_ctx.fido_action == U2F_FIDO_REGISTER)) {
         log_printf("[FIDO] REGISTER action posthook\n");
@@ -253,21 +255,22 @@ mbed_error_t handle_fido_request(int usb_msq)
     for (i = 0; i < num_full_msg; ++i) {
         msgbuf.mtype = MAGIC_APDU_RESP_MSG;
         memcpy(&msgbuf.mtext.u8[0], &resp_buf[offset], msgsz);
-        printf("[FIDO] Send APDU_RESP_MSG (pkt %d) to USB\n", i);
+        log_printf("[FIDO] Send APDU_RESP_MSG (pkt %d) to USB\n", i);
         msgsnd(usb_msq, &msgbuf, msgsz, 0);
         offset += msgsz;
     }
     if (residual_msg != 0) {
         msgbuf.mtype = MAGIC_APDU_RESP_MSG;
         memcpy(&msgbuf.mtext.u8[0], &resp_buf[offset], residual_msg);
-        printf("[FIDO] Send APDU_RESP_MSG (pkt %d, residual) to USB\n", i);
+        log_printf("[FIDO] Send APDU_RESP_MSG (pkt %d, residual) to USB\n", i);
         msgsnd(usb_msq, &msgbuf, residual_msg, 0);
         offset += residual_msg;
     }
     /* response transmission done, sending local call return from u2fapdu_handle_cmd() */
     msgbuf.mtype = MAGIC_CMD_RETURN;
     msgbuf.mtext.u8[0] = errcode;
-    msgsnd(usb_msq, &msgbuf, 1, 0);
+    msgbuf.mtext.u8[1] = fido_error;
+    msgsnd(usb_msq, &msgbuf, 2, 0);
 
 err:
     clear_ephemeral_fido_ctx(&fido_ctx);
@@ -277,7 +280,7 @@ err:
 volatile bool button_pushed = false;
 
 /* Post crypto event, should be called only for REGISTER */
-bool handle_fido_post_crypto_event_backend(uint16_t timeout __attribute__((unused)), const uint8_t appid[FIDO_APPLICATION_PARAMETER_SIZE] __attribute__((unused)), const uint8_t key_handle[FIDO_KEY_HANDLE_SIZE] __attribute__((unused)), u2f_fido_action action)
+bool handle_fido_post_crypto_event_backend(uint16_t timeout __attribute__((unused)), const uint8_t appid[FIDO_APPLICATION_PARAMETER_SIZE] __attribute__((unused)), const uint8_t key_handle[FIDO_KEY_HANDLE_SIZE] __attribute__((unused)), u2f_fido_action action __attribute__((unused)))
 {
 
     log_printf("[FIDO] Post crypto event arise, action=%d\n", action);
@@ -342,7 +345,7 @@ bool handle_fido_event_backend(uint16_t timeout, const uint8_t appid[FIDO_APPLIC
     }
     /* Ask GUI backend except when dealing with CHECK ONLY */
     if((action == U2F_FIDO_REGISTER) || (action == U2F_FIDO_AUTHENTICATE)){
-        printf("[fido]sending USER_PRESENCE_REQ to u2fpin\n");
+        log_printf("[fido]sending USER_PRESENCE_REQ to u2fpin\n");
         /* send userpresence request to u2fPIN and wait for METADATA request in response */
         msgbuf.mtext.u16[0] = timeout;
         msgbuf.mtext.u16[1] = action;
@@ -350,7 +353,7 @@ bool handle_fido_event_backend(uint16_t timeout, const uint8_t appid[FIDO_APPLIC
         msgbuf.mtype = MAGIC_USER_PRESENCE_REQ;
         msgsnd(get_u2fpin_msq(), &msgbuf, 2*sizeof(uint16_t), 0);
         /* waiting for get_metadata() as a response */
-        printf("[fido] now waiting for get_metadata reception from u2fpin\n");
+        log_printf("[fido] now waiting for get_metadata reception from u2fpin\n");
         /* receiving GET_METADATA from u2fpin.... */
         if ((len = msgrcv(get_u2fpin_msq(), &msgbuf, 64, MAGIC_STORAGE_GET_METADATA, 0)) == -1) {
             printf("[fido] failed to reveive from u2fpin: errno=%d\n", errno);
@@ -408,15 +411,18 @@ bool handle_fido_event_backend(uint16_t timeout, const uint8_t appid[FIDO_APPLIC
         }
         button_pushed = false;
         switch (msgbuf.mtext.u8[0]) {
-            case 0x0:
+            case 0x0:{
                 /* kept false */
                 break;
-            case 0xff:
+            }
+            case 0xff:{
                 button_pushed = true;
                 break;
-            default:
+            }
+            default:{
                 /* kept false */
                 break;
+            }
         }
         goto err;
     }
@@ -429,10 +435,6 @@ bool handle_fido_event_backend(uint16_t timeout, const uint8_t appid[FIDO_APPLIC
             if ((len = msgrcv(get_storage_msq(), &msgbuf, 64, 0, 0)) == -1) {
                 printf("[fido] failed to reveive from storage: errno=%d\n", errno);
                 goto err;
-            }
-            if(action == U2F_FIDO_CHECK_ONLY){
-                /* In CHECK ONLY mode, this is it, storage is OK and we can sefely continue! */
-                return true;
             }
             if (msgbuf.mtype == MAGIC_APPID_METADATA_CTR) {
                 /* here we steal the CTR to avoid to get it back again from storage,
@@ -462,10 +464,21 @@ bool handle_fido_event_backend(uint16_t timeout, const uint8_t appid[FIDO_APPLIC
             button_pushed = true;
         }
     }
+    /* In case of AUTHENTICATE or CHECK_ONLY, if the metadata is not found we
+     * always protect the user by preventing anything else to happen and return false here.
+     */
+    if((fido_ctx.valid == true) && ((fido_ctx.fido_action == U2F_FIDO_AUTHENTICATE) || (fido_ctx.fido_action == U2F_FIDO_CHECK_ONLY))) {
+        if(fido_ctx.metadata_exist == false){
+            printf("[fido] metadata do not exist in case of AUTHENTICATE or CHECK_ONLY! Protect the user\n");
+            button_pushed = false;
+            goto err;
+        }
+    }
+
 err:
     request_data_membarrier();
     log_printf("[fido] end of triggered event, ret = %d\n", button_pushed);
-    dump_ephemeral();
+    //dump_ephemeral();
 
     return button_pushed;
 }
